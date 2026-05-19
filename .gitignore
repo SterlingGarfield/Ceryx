@@ -32,3 +32,10 @@ worktrees/
 
 # pnpm temporary files
 _tmp_*
+
+# local dotnet CLI cache used in sandboxed runs
+.dotnet-cli-home/
+
+# local workspace data and tool caches
+.cache/
+.workspace-data/

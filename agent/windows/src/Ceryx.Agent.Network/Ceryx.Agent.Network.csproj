@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -6,12 +6,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Ceryx.Agent.Network\Ceryx.Agent.Network.csproj" />
+    <ProjectReference Include="..\Ceryx.Agent.Core\Ceryx.Agent.Core.csproj" />
     <ProjectReference Include="..\Ceryx.Agent.Storage\Ceryx.Agent.Storage.csproj" />
   </ItemGroup>
 </Project>

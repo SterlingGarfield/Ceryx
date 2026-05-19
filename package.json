@@ -4,14 +4,16 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
-    "lint": "turbo run lint",
-    "dev:ipad": "pnpm --filter @ceryx/ipad dev",
-    "dev:desktop": "pnpm --filter @ceryx/desktop dev",
-    "dev:agent": "dotnet run --project agent/windows/src/Ceryx.Agent.App/Ceryx.Agent.App.csproj",
-    "test:agent": "dotnet test agent/windows/Ceryx.Agent.Windows.sln"
+    "boundary:check": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"powershell -ExecutionPolicy Bypass -File .\\scripts\\check-disk-boundary.ps1\"",
+    "boundary:migrate": "powershell -ExecutionPolicy Bypass -File .\\scripts\\migrate-c-to-d.ps1",
+    "build": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"turbo run build\"",
+    "typecheck": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"turbo run typecheck\"",
+    "test": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"turbo run test\"",
+    "lint": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"turbo run lint\"",
+    "dev:ipad": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"pnpm --filter @ceryx/ipad dev\"",
+    "dev:desktop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"pnpm --filter @ceryx/desktop dev\"",
+    "dev:agent": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"dotnet run --project agent/windows/src/Ceryx.Agent.App/Ceryx.Agent.App.csproj\"",
+    "test:agent": "powershell -ExecutionPolicy Bypass -File .\\scripts\\use-disk-boundary.ps1 -Command \"dotnet test agent/windows/Ceryx.Agent.Windows.sln\""
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
