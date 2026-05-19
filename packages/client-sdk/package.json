@@ -1,0 +1,24 @@
+{
+  "name": "@ceryx/client-sdk",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "pnpm --filter @ceryx/protocol build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ceryx/protocol build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "pnpm --filter @ceryx/protocol build",
+    "test": "vitest run --pool=threads"
+  },
+  "dependencies": {
+    "@ceryx/protocol": "workspace:*"
+  },
+  "devDependencies": {}
+}

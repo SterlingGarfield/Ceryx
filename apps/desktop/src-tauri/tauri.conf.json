@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ceryx Desktop",
+  "version": "0.3.0",
+  "identifier": "com.ceryx.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm --filter @ceryx/desktop dev",
+    "beforeBuildCommand": "pnpm --filter @ceryx/desktop build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Ceryx Desktop",
+        "width": 1280,
+        "height": 800,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": false
+  }
+}

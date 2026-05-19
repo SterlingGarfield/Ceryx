@@ -1,0 +1,32 @@
+{
+  "name": "@ceryx/ui",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "pnpm --filter @ceryx/design-tokens build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ceryx/design-tokens build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "pnpm --filter @ceryx/design-tokens build",
+    "test": "vitest run --pool=threads --environment jsdom"
+  },
+  "dependencies": {
+    "@ceryx/design-tokens": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "jsdom": "^26.1.0"
+  }
+}

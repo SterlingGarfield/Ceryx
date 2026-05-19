@@ -29,3 +29,6 @@ Thumbs.db
 # Local worktrees
 .worktrees/
 worktrees/
+
+# pnpm temporary files
+_tmp_*
