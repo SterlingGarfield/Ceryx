@@ -28,6 +28,14 @@ public sealed record AgentPathsResponse(
     [property: JsonPropertyName("database")] string Database
 );
 
+public sealed record AgentManagementResponse(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("executed")] bool Executed,
+    [property: JsonPropertyName("message")] string Message
+);
+
 public sealed record StandardErrorResponse(
     [property: JsonPropertyName("ok")] bool Ok,
     [property: JsonPropertyName("error")] StandardErrorBody Error

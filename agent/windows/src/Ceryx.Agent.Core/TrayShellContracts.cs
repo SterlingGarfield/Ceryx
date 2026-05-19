@@ -1,4 +1,4 @@
-namespace Ceryx.Agent.App.Tray;
+namespace Ceryx.Agent.Core;
 
 public interface IAgentTrayShell
 {

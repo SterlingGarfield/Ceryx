@@ -1,4 +1,5 @@
 using Ceryx.Agent.App.Tray;
+using Ceryx.Agent.Core;
 using Ceryx.Agent.Storage;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;

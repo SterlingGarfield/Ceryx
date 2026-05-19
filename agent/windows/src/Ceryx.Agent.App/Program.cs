@@ -1,4 +1,5 @@
 using Ceryx.Agent.App.Tray;
+using Ceryx.Agent.Core;
 using Ceryx.Agent.Network;
 using Ceryx.Agent.Storage;
 using Serilog;
@@ -24,6 +25,7 @@ try
     builder.Host.UseSerilog();
     builder.WebHost.UseUrls("http://127.0.0.1:41527");
     builder.Services.AddSingleton(localPaths);
+    builder.Services.AddSingleton<AgentRuntimeState>();
     builder.Services.AddSingleton<IAgentTrayShell, AgentTrayShell>();
 
     var app = builder.Build();
