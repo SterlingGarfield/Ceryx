@@ -1,6 +1,8 @@
 using Ceryx.Agent.App.Tray;
 using Ceryx.Agent.Core;
 using Ceryx.Agent.Network;
+using Ceryx.Agent.Network.Discovery;
+using Ceryx.Agent.Security.Pairing;
 using Ceryx.Agent.Storage;
 using Serilog;
 using Serilog.Events;
@@ -26,6 +28,13 @@ try
     builder.WebHost.UseUrls("http://127.0.0.1:41527");
     builder.Services.AddSingleton(localPaths);
     builder.Services.AddSingleton<AgentRuntimeState>();
+    builder.Services.AddSingleton<AgentDiscoveryMetadataFactory>();
+    builder.Services.AddSingleton<IAgentDiscoveryPublisher, MdnsAgentDiscoveryPublisher>();
+    builder.Services.AddHostedService<AgentDiscoveryHostedService>();
+    builder.Services.AddSingleton<IPairingClock, SystemPairingClock>();
+    builder.Services.AddSingleton<IPairingCodeGenerator, RandomPairingCodeGenerator>();
+    builder.Services.AddSingleton<IPairingAuditSink, NoOpPairingAuditSink>();
+    builder.Services.AddSingleton<PairingStateMachine>();
     builder.Services.AddSingleton<IAgentTrayShell, AgentTrayShell>();
 
     var app = builder.Build();

@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Ceryx.Agent.Core\Ceryx.Agent.Core.csproj" />
     <ProjectReference Include="..\Ceryx.Agent.Network\Ceryx.Agent.Network.csproj" />
+    <ProjectReference Include="..\Ceryx.Agent.Security\Ceryx.Agent.Security.csproj" />
     <ProjectReference Include="..\Ceryx.Agent.Storage\Ceryx.Agent.Storage.csproj" />
   </ItemGroup>
 </Project>
