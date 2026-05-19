@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Package manager and task runner output
+.corepack/
+.turbo/
+
+# Build output
+dist/
+build/
+coverage/
+
+# Local development
+.env
+.env.*
+!.env.example
+
+# Native/build artifacts
+target/
+bin/
+obj/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local worktrees
+.worktrees/
+worktrees/

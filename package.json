@@ -1,0 +1,23 @@
+{
+  "name": "ceryx",
+  "version": "0.3.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "dev:ipad": "pnpm --filter @ceryx/ipad dev",
+    "dev:desktop": "pnpm --filter @ceryx/desktop dev",
+    "dev:agent": "dotnet run --project agent/windows/src/Ceryx.Agent.App/Ceryx.Agent.App.csproj",
+    "test:agent": "dotnet test agent/windows/Ceryx.Agent.Windows.sln"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "pnpm": "9.15.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
