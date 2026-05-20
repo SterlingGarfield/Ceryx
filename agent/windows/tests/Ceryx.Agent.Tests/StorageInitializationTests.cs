@@ -60,6 +60,29 @@ public sealed class StorageInitializationTests
 
             Assert.Subset(foundTables, expectedTables);
             Assert.Equal(expectedTables.Count, foundTables.Count);
+
+            var pairedDeviceColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var columnsCommand = connection.CreateCommand();
+            columnsCommand.CommandText = "PRAGMA table_info(paired_devices);";
+            await using var columnsReader = await columnsCommand.ExecuteReaderAsync();
+            while (await columnsReader.ReadAsync())
+            {
+                pairedDeviceColumns.Add(columnsReader.GetString(1));
+            }
+
+            var expectedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "id",
+                "name",
+                "platform",
+                "client_type",
+                "token_hash",
+                "permissions_json",
+                "created_at"
+            };
+
+            Assert.Subset(pairedDeviceColumns, expectedColumns);
+            Assert.Equal(expectedColumns.Count, pairedDeviceColumns.Count);
         }
         finally
         {

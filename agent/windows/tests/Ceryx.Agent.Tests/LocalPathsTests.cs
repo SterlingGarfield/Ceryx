@@ -8,7 +8,7 @@ public sealed class LocalPathsTests
     [Fact]
     public void EnsureDirectories_CreatesExpectedFolders()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), "ceryx-localpaths-" + Guid.NewGuid().ToString("N"));
+        var tempRoot = CreateWorkspaceTestPath("ceryx-localpaths");
 
         try
         {
@@ -34,7 +34,7 @@ public sealed class LocalPathsTests
     [Fact]
     public void CreateDefault_UsesConfiguredAgentRootWithinRepo()
     {
-        var repoRoot = Path.Combine(Path.GetTempPath(), "ceryx-repo-" + Guid.NewGuid().ToString("N"));
+        var repoRoot = CreateWorkspaceTestPath("ceryx-repo");
         var configuredRoot = Path.Combine(repoRoot, ".workspace-data", "agent");
 
         Directory.CreateDirectory(repoRoot);
@@ -68,12 +68,12 @@ public sealed class LocalPathsTests
     [Fact]
     public void CreateDefault_RejectsRootOutsideRepository()
     {
-        var repoRoot = Path.Combine(Path.GetTempPath(), "ceryx-repo-" + Guid.NewGuid().ToString("N"));
+        var repoRoot = CreateWorkspaceTestPath("ceryx-repo");
         Directory.CreateDirectory(repoRoot);
         File.WriteAllText(Path.Combine(repoRoot, "package.json"), "{}");
         File.WriteAllText(Path.Combine(repoRoot, "pnpm-workspace.yaml"), "packages: []");
 
-        var outsideRoot = Path.Combine(Path.GetTempPath(), "ceryx-outside-" + Guid.NewGuid().ToString("N"));
+        var outsideRoot = CreateWorkspaceTestPath("ceryx-outside");
 
         var oldRepo = Environment.GetEnvironmentVariable("CERYX_REPO_ROOT");
         var oldAgent = Environment.GetEnvironmentVariable("CERYX_AGENT_ROOT");
@@ -95,6 +95,11 @@ public sealed class LocalPathsTests
             {
                 Directory.Delete(repoRoot, recursive: true);
             }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, recursive: true);
+            }
         }
     }
 
@@ -106,7 +111,7 @@ public sealed class LocalPathsTests
             return;
         }
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), "ceryx-repo-" + Guid.NewGuid().ToString("N"));
+        var repoRoot = CreateWorkspaceTestPath("ceryx-repo");
         Directory.CreateDirectory(repoRoot);
         File.WriteAllText(Path.Combine(repoRoot, "package.json"), "{}");
         File.WriteAllText(Path.Combine(repoRoot, "pnpm-workspace.yaml"), "packages: []");
@@ -132,5 +137,11 @@ public sealed class LocalPathsTests
                 Directory.Delete(repoRoot, recursive: true);
             }
         }
+    }
+
+    private static string CreateWorkspaceTestPath(string prefix)
+    {
+        var testRoot = Path.Combine(Directory.GetCurrentDirectory(), ".workspace-data", "test-temp");
+        return Path.Combine(testRoot, $"{prefix}-{Guid.NewGuid():N}");
     }
 }

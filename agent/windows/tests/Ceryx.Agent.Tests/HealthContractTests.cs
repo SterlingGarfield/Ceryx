@@ -32,31 +32,43 @@ public class HealthContractTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task AgentStatusEndpoint_ReturnsContractPayload()
+    public async Task AgentStatusEndpoint_RejectsWhenTokenMissing()
     {
         var client = _factory.CreateClient();
         var response = await client.GetAsync("/api/v1/agent/status");
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         AssertValidTraceId(response);
 
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal("E_NOT_PAIRED", root.GetProperty("error").GetProperty("code").GetString());
+    }
 
-        Assert.Equal("0.3.0", root.GetProperty("agentVersion").GetString());
-        Assert.Equal("Local Windows PC", root.GetProperty("deviceName").GetString());
-        Assert.Equal("windows", root.GetProperty("platform").GetString());
-        Assert.Equal("running", root.GetProperty("status").GetString());
-        Assert.Equal(41527, root.GetProperty("httpPort").GetInt32());
-        Assert.False(root.GetProperty("supportsWebRTC").GetBoolean());
-        Assert.True(root.GetProperty("supportsDesktopClient").GetBoolean());
-        Assert.Equal("not_found", root.GetProperty("codexStatus").GetString());
+    [Fact]
+    public async Task AgentStatusEndpoint_RejectsWhenTokenInvalid()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "dt_invalid");
+
+        var response = await client.GetAsync("/api/v1/agent/status");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        AssertValidTraceId(response);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal("E_TOKEN_INVALID", root.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]
     public async Task AgentPathsEndpoint_ReturnsContractPayload()
     {
-        var client = _factory.CreateClient();
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Ceryx.Agent.Core.Permission.ViewWindow]);
         var response = await client.GetAsync("/api/v1/agent/paths");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

@@ -20,5 +20,9 @@ public sealed record PairingConfirmResult(
     string State,
     bool IsLocked,
     int FailedAttempts,
-    string? RejectedReason = null
+    string? RejectedReason = null,
+    string? PairingId = null,
+    string? ClientName = null,
+    string? ClientType = null,
+    string? Platform = null
 );

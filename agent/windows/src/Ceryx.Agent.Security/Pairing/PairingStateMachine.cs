@@ -75,7 +75,10 @@ public sealed class PairingStateMachine
                 Code: code,
                 ExpiresAt: expiresAt,
                 State: "waiting_desktop_confirm",
-                DesktopConfirmed: false);
+                DesktopConfirmed: false,
+                ClientName: context.ClientName,
+                ClientType: context.ClientType,
+                Platform: context.Platform);
         }
 
         await WriteAuditAsync("pairing_request", "waiting_desktop_confirm", "Pairing request created.", cancellationToken);
@@ -195,7 +198,11 @@ public sealed class PairingStateMachine
                 IsSuccess: true,
                 State: "success",
                 IsLocked: false,
-                FailedAttempts: 0);
+                FailedAttempts: 0,
+                PairingId: pendingSnapshot.PairingId,
+                ClientName: pendingSnapshot.ClientName,
+                ClientType: pendingSnapshot.ClientType,
+                Platform: pendingSnapshot.Platform);
         }
 
         lock (_sync)
@@ -265,6 +272,9 @@ public sealed class PairingStateMachine
         string Code,
         DateTimeOffset ExpiresAt,
         string State,
-        bool DesktopConfirmed
+        bool DesktopConfirmed,
+        string ClientName,
+        string ClientType,
+        string Platform
     );
 }

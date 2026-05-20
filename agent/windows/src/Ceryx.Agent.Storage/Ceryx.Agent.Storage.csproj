@@ -11,5 +11,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ceryx.Agent.Core\Ceryx.Agent.Core.csproj" />
+    <ProjectReference Include="..\Ceryx.Agent.Security\Ceryx.Agent.Security.csproj" />
   </ItemGroup>
 </Project>

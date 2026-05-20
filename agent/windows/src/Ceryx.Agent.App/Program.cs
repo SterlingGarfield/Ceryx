@@ -2,8 +2,12 @@ using Ceryx.Agent.App.Tray;
 using Ceryx.Agent.Core;
 using Ceryx.Agent.Network;
 using Ceryx.Agent.Network.Discovery;
+using Ceryx.Agent.Security.Devices;
 using Ceryx.Agent.Security.Pairing;
+using Ceryx.Agent.Security.Tokens;
 using Ceryx.Agent.Storage;
+using Ceryx.Agent.Storage.Devices;
+using Ceryx.Agent.Storage.Sqlite;
 using Serilog;
 using Serilog.Events;
 
@@ -35,6 +39,12 @@ try
     builder.Services.AddSingleton<IPairingCodeGenerator, RandomPairingCodeGenerator>();
     builder.Services.AddSingleton<IPairingAuditSink, NoOpPairingAuditSink>();
     builder.Services.AddSingleton<PairingStateMachine>();
+    builder.Services.AddSingleton<SqliteConnectionFactory>();
+    builder.Services.AddSingleton<ITrustedDeviceStore, SqliteTrustedDeviceStore>();
+    builder.Services.AddSingleton<IDeviceTokenGenerator, DeviceTokenGenerator>();
+    builder.Services.AddSingleton<IDeviceTokenHasher, DeviceTokenHasher>();
+    builder.Services.AddSingleton<IDefaultPermissionPolicy, DefaultPermissionPolicy>();
+    builder.Services.AddSingleton<PairingCompletionService>();
     builder.Services.AddSingleton<IAgentTrayShell, AgentTrayShell>();
 
     var app = builder.Build();
@@ -56,6 +66,7 @@ try
         string.Join(", ", trayShell.Commands.Select(static command => command.Id)));
 
     app.UseAgentRequestTracing();
+    app.UseAgentAuthorization();
     app.MapAgentRoutes(localPaths);
 
     app.Run();

@@ -17,7 +17,9 @@ public class AgentManagementTests : IClassFixture<WebApplicationFactory<Program>
     [Fact]
     public async Task PauseAndResumeControl_UpdatesAgentStatus()
     {
-        var client = _factory.CreateClient();
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Ceryx.Agent.Core.Permission.ManageAgent]);
 
         var pauseResponse = await client.PostAsync("/api/v1/agent/pause-control", content: null);
         Assert.Equal(HttpStatusCode.OK, pauseResponse.StatusCode);
@@ -50,7 +52,9 @@ public class AgentManagementTests : IClassFixture<WebApplicationFactory<Program>
     [Fact]
     public async Task RestartRequest_ReturnsAcceptedButNotExecuted()
     {
-        var client = _factory.CreateClient();
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Ceryx.Agent.Core.Permission.ManageAgent]);
         var response = await client.PostAsync("/api/v1/agent/restart-request", content: null);
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
@@ -68,7 +72,9 @@ public class AgentManagementTests : IClassFixture<WebApplicationFactory<Program>
     [Fact]
     public async Task OpenLogsFolder_AllowsLocalRequest()
     {
-        var client = _factory.CreateClient();
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Ceryx.Agent.Core.Permission.ManageAgent]);
         var response = await client.PostAsync("/api/v1/agent/open-logs-folder", content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -84,9 +90,12 @@ public class AgentManagementTests : IClassFixture<WebApplicationFactory<Program>
     [Fact]
     public async Task LocalManagementEndpoints_RejectRemoteOriginRequests()
     {
-        var client = _factory.CreateClient();
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Ceryx.Agent.Core.Permission.ManageAgent]);
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/agent/pause-control");
         request.Headers.Add("X-Forwarded-For", "203.0.113.10");
+        request.Headers.Authorization = client.DefaultRequestHeaders.Authorization;
 
         var response = await client.SendAsync(request);
 
@@ -98,5 +107,22 @@ public class AgentManagementTests : IClassFixture<WebApplicationFactory<Program>
         Assert.False(root.GetProperty("ok").GetBoolean());
         Assert.Equal("E_PERMISSION_DENIED", root.GetProperty("error").GetProperty("code").GetString());
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("error").GetProperty("traceId").GetString()));
+    }
+
+    [Fact]
+    public async Task LocalManagementEndpoints_RejectWhenPermissionMissing()
+    {
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Ceryx.Agent.Core.Permission.ViewWindow]);
+        var response = await client.PostAsync("/api/v1/agent/pause-control", content: null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("X-Trace-Id", out _));
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal("E_PERMISSION_DENIED", root.GetProperty("error").GetProperty("code").GetString());
     }
 }
