@@ -15,7 +15,7 @@ public class AgentStatusTests
             Platform: "windows",
             Status: AgentRuntimeStatus.Running.ToWireValue(),
             HttpPort: 41527,
-            SupportsWebRTC: false,
+            SupportsWebRTC: true,
             SupportsDesktopClient: true,
             CodexStatus: CodexWindowStatus.NotFound.ToWireValue());
 

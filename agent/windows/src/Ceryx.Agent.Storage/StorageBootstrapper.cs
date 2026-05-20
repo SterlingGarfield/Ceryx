@@ -70,6 +70,7 @@ public sealed class StorageBootstrapper
             CREATE TABLE IF NOT EXISTS audit_logs (
               id TEXT PRIMARY KEY,
               action TEXT NOT NULL,
+              details TEXT NOT NULL DEFAULT '',
               created_at TEXT NOT NULL
             );
 
@@ -120,6 +121,15 @@ public sealed class StorageBootstrapper
             "permissions_json",
             "TEXT NOT NULL DEFAULT '[]'",
             cancellationToken);
+
+        var auditColumns = await ReadTableColumnsAsync(connection, "audit_logs", cancellationToken);
+        await AddColumnIfMissingAsync(
+            connection,
+            auditColumns,
+            "details",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken,
+            tableName: "audit_logs");
     }
 
     private static async Task<HashSet<string>> ReadTableColumnsAsync(
@@ -145,7 +155,8 @@ public sealed class StorageBootstrapper
         ISet<string> existingColumns,
         string columnName,
         string columnDefinition,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string tableName = "paired_devices")
     {
         if (existingColumns.Contains(columnName))
         {
@@ -153,7 +164,7 @@ public sealed class StorageBootstrapper
         }
 
         var command = connection.CreateCommand();
-        command.CommandText = $"ALTER TABLE paired_devices ADD COLUMN {columnName} {columnDefinition};";
+        command.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnDefinition};";
         try
         {
             await command.ExecuteNonQueryAsync(cancellationToken);

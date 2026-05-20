@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ceryx.Agent.Core\Ceryx.Agent.Core.csproj" />
+    <ProjectReference Include="..\Ceryx.Agent.Codex\Ceryx.Agent.Codex.csproj" />
+    <ProjectReference Include="..\Ceryx.Agent.Storage\Ceryx.Agent.Storage.csproj" />
+  </ItemGroup>
+</Project>
