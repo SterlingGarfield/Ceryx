@@ -118,7 +118,7 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth(Permission.ViewWindow);
         app.MapPost(
             "/api/v1/codex/select-window",
-            (CodexSelectWindowBody body, ICodexWindowLocator locator) => SelectCodexWindowHandler(body, locator))
+            (HttpContext context, CodexSelectWindowBody body, ICodexWindowLocator locator) => SelectCodexWindowHandler(context, body, locator))
             .RequireAgentAuth(Permission.ControlInput);
 
         app.MapPost(
@@ -416,17 +416,15 @@ public static class AgentHttpHostExtensions
         return TypedResults.Ok(ToCodexWindowResponse(snapshot));
     }
 
-    private static async Task<IResult> SelectCodexWindowHandler(CodexSelectWindowBody body, ICodexWindowLocator locator)
+    private static async Task<IResult> SelectCodexWindowHandler(HttpContext context, CodexSelectWindowBody body, ICodexWindowLocator locator)
     {
         if (string.IsNullOrWhiteSpace(body.WindowId))
         {
-            return Results.Json(new StandardErrorResponse(
-                Ok: false,
-                Error: new StandardErrorBody(
-                    Code: "E_CODEX_NOT_FOUND",
-                    Message: "windowId is required.",
-                    Hint: "Provide a valid windowId from /api/v1/codex/window.",
-                    TraceId: "trace_codex_select")));
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_CODEX_NOT_FOUND",
+                Message: "windowId is required.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Provide a valid windowId from /api/v1/codex/window."));
         }
 
         var snapshot = await locator.SelectWindowAsync(body.WindowId);
@@ -532,7 +530,7 @@ public static class AgentHttpHostExtensions
     {
         var window = await locator.GetWindowAsync(context.RequestAborted);
         var result = await captureLifecycleService.StartAsync(body, window, context.RequestAborted);
-        if (!result.IsSuccess || result.Error is null || result.Value is null)
+        if (!result.IsSuccess || result.Value is null)
         {
             return ErrorFromAgentError(context, result.Error ?? new AgentError("E_CAPTURE_FAILED", "Failed to start capture.", context.GetOrCreateTraceId()));
         }
@@ -581,7 +579,7 @@ public static class AgentHttpHostExtensions
 
         await using var stream = file.OpenReadStream();
         var upload = await uploadImageService.UploadImageAsync(file.FileName, stream, context.RequestAborted);
-        if (!upload.IsSuccess || upload.Error is null || upload.Value is null)
+        if (!upload.IsSuccess || upload.Value is null)
         {
             return ErrorFromAgentError(context, upload.Error ?? new AgentError("E_CAPTURE_FAILED", "Upload failed.", context.GetOrCreateTraceId()));
         }
@@ -600,7 +598,7 @@ public static class AgentHttpHostExtensions
     {
         var window = await locator.GetWindowAsync(context.RequestAborted);
         var screenshot = await screenshotService.CaptureAsync(window, context.RequestAborted);
-        if (!screenshot.IsSuccess || screenshot.Error is null || screenshot.Value is null)
+        if (!screenshot.IsSuccess || screenshot.Value is null)
         {
             return ErrorFromAgentError(context, screenshot.Error ?? new AgentError("E_CAPTURE_FAILED", "Screenshot failed.", context.GetOrCreateTraceId()));
         }
@@ -617,7 +615,7 @@ public static class AgentHttpHostExtensions
     {
         var window = await locator.GetWindowAsync(context.RequestAborted);
         var result = await recordingService.StartAsync(window, context.RequestAborted);
-        if (!result.IsSuccess || result.Error is null || result.Value is null)
+        if (!result.IsSuccess || result.Value is null)
         {
             return ErrorFromAgentError(context, result.Error ?? new AgentError("E_RECORDING_BUSY", "Failed to start recording.", context.GetOrCreateTraceId()));
         }
@@ -632,7 +630,7 @@ public static class AgentHttpHostExtensions
         IAuditLogStore auditLogStore)
     {
         var result = await recordingService.StopAsync(context.RequestAborted);
-        if (!result.IsSuccess || result.Error is null || result.Value is null)
+        if (!result.IsSuccess || result.Value is null)
         {
             return ErrorFromAgentError(context, result.Error ?? new AgentError("E_RECORDING_BUSY", "Failed to stop recording.", context.GetOrCreateTraceId()));
         }
