@@ -10,9 +10,16 @@
     }
   },
   "scripts": {
+    "prebuild": "pnpm --filter @ceryx/client-sdk build",
     "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ceryx/client-sdk build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "pretest": "pnpm --filter @ceryx/client-sdk build",
+    "test": "vitest run --pool=threads"
   },
-  "devDependencies": {}
+  "dependencies": {
+    "@ceryx/client-sdk": "workspace:^",
+    "@ceryx/protocol": "workspace:^",
+    "zustand": "^5.0.13"
+  }
 }
