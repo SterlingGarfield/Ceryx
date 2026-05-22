@@ -1,4 +1,7 @@
 import type {
+  AgentManagementResponse,
+  AgentSettingsPatch,
+  AgentPathsResponse,
   AgentStatus,
   CaptureSignalRequest,
   CaptureSignalResponse,
@@ -12,15 +15,31 @@ import type {
   InputMouseRequest,
   InputScrollRequest,
   InputTextRequest,
+  LogsQuery,
+  LogsResponse,
+  PairingDesktopConfirmRequest,
+  PairingDesktopConfirmResponse,
   PairingConfirmRequest,
   PairingConfirmResponse,
   PairingRequest,
   PairingRequestResponse,
   PromptSendRequest,
   PromptSendResponse,
+  ProjectDiffFileResponse,
+  ProjectDiffFilesResponse,
+  ProjectDiffResponse,
+  ProjectFilesResponse,
+  ProjectTasksResponse,
+  ProjectTestRequest,
+  ProjectTestResponse,
+  NotificationClearResponse,
+  NotificationReadResponse,
+  NotificationsResponse,
   RecordingStartResponse,
   RecordingStopResponse,
   ScreenshotResponse,
+  SettingsPatchRequest,
+  SettingsResponse,
   TrustedDevice,
   UploadImageResponse
 } from "@ceryx/protocol";
@@ -37,7 +56,7 @@ export interface AgentClientOptions {
 
 interface RequestConfig {
   auth: boolean;
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   allowNon2xx?: boolean;
 }
@@ -143,12 +162,26 @@ export class AgentClient {
     return response;
   }
 
+  async desktopConfirmPairing(
+    request: PairingDesktopConfirmRequest
+  ): Promise<PairingDesktopConfirmResponse> {
+    return this.request<PairingDesktopConfirmResponse>("/api/v1/pairing/desktop-confirm", {
+      auth: false,
+      method: "POST",
+      body: request
+    });
+  }
+
   async connect(): Promise<AgentStatus> {
     return this.agentStatus();
   }
 
   async agentStatus(): Promise<AgentStatus> {
     return this.request<AgentStatus>("/api/v1/agent/status", { auth: true });
+  }
+
+  async agentPaths(): Promise<AgentPathsResponse> {
+    return this.request<AgentPathsResponse>("/api/v1/agent/paths", { auth: true });
   }
 
   async listDevices(): Promise<TrustedDevice[]> {
@@ -197,6 +230,123 @@ export class AgentClient {
       auth: true,
       method: "POST",
       body: request
+    });
+  }
+
+  async getProjectDiff(): Promise<ProjectDiffResponse> {
+    return this.request<ProjectDiffResponse>("/api/v1/project/diff", {
+      auth: true
+    });
+  }
+
+  async getProjectDiffFiles(projectId: string): Promise<ProjectDiffFilesResponse> {
+    if (!projectId.trim()) {
+      throw new Error("projectId is required");
+    }
+
+    return this.request<ProjectDiffFilesResponse>(
+      `/api/v1/project/diff/files?projectId=${encodeURIComponent(projectId)}`,
+      {
+        auth: true
+      }
+    );
+  }
+
+  async getProjectDiffFile(projectId: string, path: string): Promise<ProjectDiffFileResponse> {
+    if (!projectId.trim()) {
+      throw new Error("projectId is required");
+    }
+
+    if (!path.trim()) {
+      throw new Error("path is required");
+    }
+
+    return this.request<ProjectDiffFileResponse>(
+      `/api/v1/project/diff/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`,
+      {
+        auth: true
+      }
+    );
+  }
+
+  async getProjectFiles(
+    projectId: string,
+    options: { query?: string; limit?: number } = {}
+  ): Promise<ProjectFilesResponse> {
+    if (!projectId.trim()) {
+      throw new Error("projectId is required");
+    }
+
+    if (options.limit !== undefined && options.limit <= 0) {
+      throw new Error("limit must be greater than 0");
+    }
+
+    const search = new URLSearchParams();
+    search.set("projectId", projectId);
+    if (options.query && options.query.trim()) {
+      search.set("query", options.query.trim());
+    }
+
+    if (options.limit !== undefined) {
+      search.set("limit", String(options.limit));
+    }
+
+    return this.request<ProjectFilesResponse>(
+      `/api/v1/project/files?${search.toString()}`,
+      {
+        auth: true
+      }
+    );
+  }
+
+  async requestProjectTest(request: ProjectTestRequest = {}): Promise<ProjectTestResponse> {
+    return this.request<ProjectTestResponse>("/api/v1/project/test-request", {
+      auth: true,
+      method: "POST",
+      body: request
+    });
+  }
+
+  async getProjectTasks(promptLimit?: number): Promise<ProjectTasksResponse> {
+    if (promptLimit !== undefined && promptLimit <= 0) {
+      throw new Error("promptLimit must be greater than 0");
+    }
+
+    const path = promptLimit === undefined
+      ? "/api/v1/project/tasks"
+      : `/api/v1/project/tasks?promptLimit=${encodeURIComponent(String(promptLimit))}`;
+    return this.request<ProjectTasksResponse>(path, { auth: true });
+  }
+
+  async getNotifications(limit?: number): Promise<NotificationsResponse> {
+    if (limit !== undefined && limit <= 0) {
+      throw new Error("limit must be greater than 0");
+    }
+
+    const path = limit === undefined
+      ? "/api/v1/notifications"
+      : `/api/v1/notifications?limit=${encodeURIComponent(String(limit))}`;
+    return this.request<NotificationsResponse>(path, { auth: true });
+  }
+
+  async markNotificationRead(notificationId: string): Promise<NotificationReadResponse> {
+    if (!notificationId.trim()) {
+      throw new Error("notificationId is required");
+    }
+
+    return this.request<NotificationReadResponse>(
+      `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+      {
+        auth: true,
+        method: "POST"
+      }
+    );
+  }
+
+  async clearNotifications(): Promise<NotificationClearResponse> {
+    return this.request<NotificationClearResponse>("/api/v1/notifications/clear", {
+      auth: true,
+      method: "POST"
     });
   }
 
@@ -302,6 +452,91 @@ export class AgentClient {
     return this.request<RecordingStopResponse>("/api/v1/media/recording/stop", {
       auth: true,
       method: "POST"
+    });
+  }
+
+  async pauseControl(): Promise<AgentManagementResponse> {
+    return this.request<AgentManagementResponse>("/api/v1/agent/pause-control", {
+      auth: true,
+      method: "POST"
+    });
+  }
+
+  async resumeControl(): Promise<AgentManagementResponse> {
+    return this.request<AgentManagementResponse>("/api/v1/agent/resume-control", {
+      auth: true,
+      method: "POST"
+    });
+  }
+
+  async openLogsFolder(): Promise<AgentManagementResponse> {
+    return this.request<AgentManagementResponse>("/api/v1/agent/open-logs-folder", {
+      auth: true,
+      method: "POST"
+    });
+  }
+
+  async restartRequest(): Promise<AgentManagementResponse> {
+    return this.request<AgentManagementResponse>("/api/v1/agent/restart-request", {
+      auth: true,
+      method: "POST"
+    });
+  }
+
+  async getLogs(query: LogsQuery = {}): Promise<LogsResponse> {
+    if (query.page !== undefined && query.page <= 0) {
+      throw new Error("page must be greater than 0");
+    }
+
+    if (query.pageSize !== undefined && query.pageSize <= 0) {
+      throw new Error("pageSize must be greater than 0");
+    }
+
+    const search = new URLSearchParams();
+    if (query.page !== undefined) {
+      search.set("page", String(query.page));
+    }
+
+    if (query.pageSize !== undefined) {
+      search.set("pageSize", String(query.pageSize));
+    }
+
+    if (query.severity && query.severity.trim()) {
+      search.set("severity", query.severity.trim());
+    }
+
+    if (query.action && query.action.trim()) {
+      search.set("action", query.action.trim());
+    }
+
+    if (query.sessionId && query.sessionId.trim()) {
+      search.set("sessionId", query.sessionId.trim());
+    }
+
+    const queryString = search.toString();
+    const path = queryString ? `/api/v1/logs?${queryString}` : "/api/v1/logs";
+    return this.request<LogsResponse>(path, { auth: true });
+  }
+
+  async getSettings(): Promise<SettingsResponse> {
+    return this.request<SettingsResponse>("/api/v1/settings", { auth: true });
+  }
+
+  async patchSettings(request: SettingsPatchRequest): Promise<SettingsResponse> {
+    return this.request<SettingsResponse>("/api/v1/settings", {
+      auth: true,
+      method: "PATCH",
+      body: request
+    });
+  }
+
+  async patchAgentSettings(
+    patch: AgentSettingsPatch,
+    confirmHighRisk = false
+  ): Promise<SettingsResponse> {
+    return this.patchSettings({
+      agentSettings: patch,
+      confirmHighRisk
     });
   }
 

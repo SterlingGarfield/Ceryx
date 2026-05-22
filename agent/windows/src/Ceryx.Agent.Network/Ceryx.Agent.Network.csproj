@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Ceryx.Agent.Codex\Ceryx.Agent.Codex.csproj" />
     <ProjectReference Include="..\Ceryx.Agent.Core\Ceryx.Agent.Core.csproj" />
     <ProjectReference Include="..\Ceryx.Agent.Media\Ceryx.Agent.Media.csproj" />
+    <ProjectReference Include="..\Ceryx.Agent.Project\Ceryx.Agent.Project.csproj" />
     <ProjectReference Include="..\Ceryx.Agent.Security\Ceryx.Agent.Security.csproj" />
     <ProjectReference Include="..\Ceryx.Agent.Storage\Ceryx.Agent.Storage.csproj" />
   </ItemGroup>

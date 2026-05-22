@@ -116,3 +116,202 @@ export interface RecordingStopResponse {
   fileName: string;
   sizeBytes: number;
 }
+
+export interface AgentPathsResponse {
+  root: string;
+  logs: string;
+  uploads: string;
+  screenshots: string;
+  recordings: string;
+  database: string;
+}
+
+export interface AgentManagementResponse {
+  ok: boolean;
+  action: string;
+  status: string;
+  executed: boolean;
+  message: string;
+}
+
+export const LogSeverityValues = ["info", "warning", "error"] as const;
+export type LogSeverity = (typeof LogSeverityValues)[number];
+
+export interface AgentLogEntry {
+  id: string;
+  action: string;
+  details: string;
+  severity: LogSeverity | string;
+  sessionId: string;
+  createdAt: string;
+}
+
+export interface LogsResponse {
+  ok: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  items: AgentLogEntry[];
+}
+
+export interface LogsQuery {
+  page?: number;
+  pageSize?: number;
+  severity?: LogSeverity | string;
+  action?: string;
+  sessionId?: string;
+}
+
+export interface AgentSettingsState {
+  httpPort: number;
+  directTestCommand: string;
+  allowFullscreenCapture: boolean;
+  allowClearLogs: boolean;
+  defaultCaptureMode: string;
+}
+
+export interface ClientSettingsState {
+  theme: "system" | "light" | "dark" | string;
+  compactMode: boolean;
+  showLatency: boolean;
+  keyboardShortcuts: boolean;
+  notificationsEnabled: boolean;
+  logsAutoRefresh: boolean;
+}
+
+export interface SettingsResponse {
+  ok: boolean;
+  updatedAt: string;
+  agentSettings: AgentSettingsState;
+  clientSettings: ClientSettingsState;
+}
+
+export interface AgentSettingsPatch {
+  httpPort?: number;
+  directTestCommand?: string;
+  allowFullscreenCapture?: boolean;
+  allowClearLogs?: boolean;
+  defaultCaptureMode?: string;
+}
+
+export interface SettingsPatchRequest {
+  agentSettings?: AgentSettingsPatch;
+  confirmHighRisk?: boolean;
+}
+
+export interface ProjectDiffResponse {
+  ok: boolean;
+  status: string;
+  summary: string;
+  diffText?: string;
+}
+
+export interface ProjectDiffFileEntry {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface ProjectDiffFilesResponse {
+  ok: boolean;
+  projectId: string;
+  projectName: string;
+  files: ProjectDiffFileEntry[];
+}
+
+export interface ProjectDiffFileResponse {
+  ok: boolean;
+  projectId: string;
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  diffText: string;
+  truncated: boolean;
+  lineLimit: number;
+}
+
+export interface ProjectFileEntry {
+  path: string;
+  extension: string;
+  tracked: boolean;
+  changed: boolean;
+}
+
+export interface ProjectFilesResponse {
+  ok: boolean;
+  projectId: string;
+  projectName: string;
+  generatedAt: string;
+  files: ProjectFileEntry[];
+}
+
+export interface ProjectTestRequest {
+  scope?: string;
+}
+
+export interface ProjectTestResponse {
+  ok: boolean;
+  status: string;
+  message: string;
+  requestId?: string;
+}
+
+export interface ProjectTaskState {
+  status: string;
+  currentAction?: string | null;
+  updatedAt: string;
+}
+
+export interface ProjectTaskPromptAction {
+  id: string;
+  action: string;
+  details: string;
+  severity: string;
+  sessionId: string;
+  createdAt: string;
+}
+
+export interface ProjectTestRequestState {
+  status: string;
+  requestId?: string | null;
+  scope?: string | null;
+  message: string;
+  requestedAt?: string | null;
+}
+
+export interface ProjectTasksResponse {
+  ok: boolean;
+  taskState: ProjectTaskState;
+  recentPromptActions: ProjectTaskPromptAction[];
+  testRequest: ProjectTestRequestState;
+}
+
+export interface AgentNotificationEntry {
+  id: string;
+  title: string;
+  message: string;
+  severity: string;
+  createdAt: string;
+  read: boolean;
+}
+
+export interface NotificationsResponse {
+  ok: boolean;
+  total: number;
+  unread: number;
+  items: AgentNotificationEntry[];
+}
+
+export interface NotificationReadResponse {
+  ok: boolean;
+  id: string;
+  read: boolean;
+}
+
+export interface NotificationClearResponse {
+  ok: boolean;
+  clearedBefore: string;
+}

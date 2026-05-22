@@ -5,20 +5,29 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "pnpm --filter @ceryx/feature-remote-control build",
     "build": "vite build",
+    "pretypecheck": "pnpm --filter @ceryx/feature-remote-control build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "pretest": "pnpm --filter @ceryx/feature-remote-control build",
+    "test": "vitest run --environment jsdom"
   },
   "dependencies": {
+    "@ceryx/client-sdk": "workspace:^",
     "@ceryx/design-tokens": "workspace:*",
+    "@ceryx/feature-remote-control": "workspace:^",
     "@ceryx/ui": "workspace:*",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.5.2",
+    "jsdom": "^26.1.0",
     "vite": "^7.2.0"
   }
 }

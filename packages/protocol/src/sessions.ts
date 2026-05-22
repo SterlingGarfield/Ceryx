@@ -19,6 +19,15 @@ export interface PairingConfirmRequest {
   code: string;
 }
 
+export interface PairingDesktopConfirmRequest {
+  pairingId: string;
+}
+
+export interface PairingDesktopConfirmResponse {
+  ok: boolean;
+  state: string;
+}
+
 export interface PairingConfirmResponse {
   ok: true;
   deviceId: string;

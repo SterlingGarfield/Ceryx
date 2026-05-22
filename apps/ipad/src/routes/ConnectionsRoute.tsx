@@ -212,6 +212,23 @@ export function ConnectionsRoute() {
                   >
                     Pair This Agent
                   </Button>
+                  <Button
+                    size="ipad"
+                    variant="secondary"
+                    style={{ minWidth: 150 }}
+                    disabled={!probe.reachable}
+                    onClick={() => {
+                      setCurrentDevice({
+                        deviceId: `device:${probe.baseUrl}`,
+                        deviceName: probe.deviceName,
+                        platform: "windows",
+                        baseUrl: probe.baseUrl
+                      });
+                      navigate("/console");
+                    }}
+                  >
+                    Open Console
+                  </Button>
                 </div>
               </div>
             ))

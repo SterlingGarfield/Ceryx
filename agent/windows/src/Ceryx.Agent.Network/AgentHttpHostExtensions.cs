@@ -5,10 +5,13 @@ using Ceryx.Agent.Codex.Input;
 using Ceryx.Agent.Codex.SessionLock;
 using Ceryx.Agent.Codex.WindowLocator;
 using Ceryx.Agent.Media;
+using Ceryx.Agent.Project;
 using Ceryx.Agent.Security.Devices;
 using Ceryx.Agent.Security.Pairing;
 using Ceryx.Agent.Storage;
 using Ceryx.Agent.Storage.Audit;
+using Ceryx.Agent.Storage.Notifications;
+using Ceryx.Agent.Storage.Settings;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -176,6 +179,36 @@ public static class AgentHttpHostExtensions
             (HttpContext context, IUploadImageService uploadImageService, IImagePasteService imagePasteService, LocalPaths paths, IAuditLogStore auditLogStore) =>
                 UploadImageHandler(context, uploadImageService, imagePasteService, paths, auditLogStore))
             .RequireAgentAuth(Permission.UploadImage);
+        app.MapGet(
+            "/api/v1/project/diff",
+            (HttpContext context, string? projectId, IProjectConfigRepository projectConfigRepository, IGitDiffService gitDiffService) =>
+                ProjectDiffSummaryHandler(context, projectId, projectConfigRepository, gitDiffService))
+            .RequireAgentAuth(Permission.ReadDiff);
+        app.MapGet(
+            "/api/v1/project/diff/files",
+            (HttpContext context, string? projectId, IProjectConfigRepository projectConfigRepository, IGitDiffService gitDiffService) =>
+                ProjectDiffFilesHandler(context, projectId, projectConfigRepository, gitDiffService))
+            .RequireAgentAuth(Permission.ReadDiff);
+        app.MapGet(
+            "/api/v1/project/diff/file",
+            (HttpContext context, string? projectId, string? path, IProjectConfigRepository projectConfigRepository, IGitDiffService gitDiffService) =>
+                ProjectDiffFileHandler(context, projectId, path, projectConfigRepository, gitDiffService))
+            .RequireAgentAuth(Permission.ReadDiff);
+        app.MapGet(
+            "/api/v1/project/files",
+            (HttpContext context, string? projectId, string? query, int? limit, IProjectConfigRepository projectConfigRepository, IProjectFileIndexService projectFileIndexService) =>
+                ProjectFilesHandler(context, projectId, query, limit, projectConfigRepository, projectFileIndexService))
+            .RequireAgentAuth(Permission.ReadDiff);
+        app.MapPost(
+            "/api/v1/project/test-request",
+            (HttpContext context, ProjectTestRequestBody body, IAuditLogStore auditLogStore) =>
+                ProjectTestRequestHandler(context, body, auditLogStore))
+            .RequireAgentAuth(Permission.RunTest);
+        app.MapGet(
+            "/api/v1/project/tasks",
+            (HttpContext context, int? promptLimit, IAuditLogStore auditLogStore) =>
+                ProjectTasksHandler(context, promptLimit, auditLogStore))
+            .RequireAgentAuth();
         app.MapPost(
             "/api/v1/media/screenshot",
             (HttpContext context, IScreenshotService screenshotService, ICodexWindowLocator locator, IAuditLogStore auditLogStore) =>
@@ -212,6 +245,36 @@ public static class AgentHttpHostExtensions
             (HttpContext context, ILoggerFactory loggerFactory) =>
                 RestartRequestHandler(context, loggerFactory))
             .RequireAgentAuth(Permission.ManageAgent);
+        app.MapGet(
+            "/api/v1/logs",
+            (HttpContext context, int? page, int? pageSize, string? severity, string? action, string? sessionId, IAuditLogStore auditLogStore) =>
+                LogsHandler(context, page, pageSize, severity, action, sessionId, auditLogStore))
+            .RequireAgentAuth();
+        app.MapGet(
+            "/api/v1/settings",
+            (HttpContext context, IAgentSettingsStore settingsStore) =>
+                GetSettingsHandler(context, settingsStore))
+            .RequireAgentAuth();
+        app.MapPatch(
+            "/api/v1/settings",
+            (HttpContext context, SettingsPatchBody body, IAgentSettingsStore settingsStore) =>
+                PatchSettingsHandler(context, body, settingsStore))
+            .RequireAgentAuth(Permission.ManageAgent);
+        app.MapGet(
+            "/api/v1/notifications",
+            (HttpContext context, int? limit, IAuditLogStore auditLogStore, INotificationStateStore notificationStateStore) =>
+                NotificationsHandler(context, limit, auditLogStore, notificationStateStore))
+            .RequireAgentAuth();
+        app.MapPost(
+            "/api/v1/notifications/{notificationId}/read",
+            (HttpContext context, string notificationId, INotificationStateStore notificationStateStore) =>
+                NotificationReadHandler(context, notificationId, notificationStateStore))
+            .RequireAgentAuth();
+        app.MapPost(
+            "/api/v1/notifications/clear",
+            (HttpContext context, INotificationStateStore notificationStateStore) =>
+                NotificationClearHandler(context, notificationStateStore))
+            .RequireAgentAuth();
 
         return app;
     }
@@ -446,7 +509,7 @@ public static class AgentHttpHostExtensions
         }
 
         var result = await inputBridge.ExecuteKeyAsync(prepare.Context, body, context.RequestAborted);
-        await auditLogStore.WriteAsync("input.key.accepted", result.Message, context.RequestAborted);
+        await WriteAuditAsync(auditLogStore, context, "input.key.accepted", result.Message);
         return TypedResults.Ok(new InputActionResponse(
             Ok: result.IsAccepted,
             Action: result.Action,
@@ -469,7 +532,7 @@ public static class AgentHttpHostExtensions
         }
 
         var result = await inputBridge.ExecuteMouseAsync(prepare.Context, body, context.RequestAborted);
-        await auditLogStore.WriteAsync("input.mouse.accepted", result.Message, context.RequestAborted);
+        await WriteAuditAsync(auditLogStore, context, "input.mouse.accepted", result.Message);
         return TypedResults.Ok(new InputActionResponse(
             Ok: result.IsAccepted,
             Action: result.Action,
@@ -494,7 +557,7 @@ public static class AgentHttpHostExtensions
 
         _ = mapOperation();
         var message = $"{action} accepted for window {prepare.Context.WindowId}";
-        await auditLogStore.WriteAsync($"{action}.accepted", message, context.RequestAborted);
+        await WriteAuditAsync(auditLogStore, context, $"{action}.accepted", message);
         return TypedResults.Ok(new InputActionResponse(
             Ok: true,
             Action: action,
@@ -517,7 +580,11 @@ public static class AgentHttpHostExtensions
         }
 
         var response = await promptBridgeService.SendPromptAsync(prepare.Context, body, context.RequestAborted);
-        await auditLogStore.WriteAsync("prompt.send.accepted", $"submitted={response.Submitted}", context.RequestAborted);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "prompt.send.accepted",
+            $"submitted={response.Submitted}");
         return TypedResults.Ok(response);
     }
 
@@ -535,7 +602,11 @@ public static class AgentHttpHostExtensions
             return ErrorFromAgentError(context, result.Error ?? new AgentError("E_CAPTURE_FAILED", "Failed to start capture.", context.GetOrCreateTraceId()));
         }
 
-        await auditLogStore.WriteAsync("capture.started", $"mode={result.Value.Mode};window={result.Value.WindowId}", context.RequestAborted);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "capture.started",
+            $"mode={result.Value.Mode};window={result.Value.WindowId}");
         return TypedResults.Ok(ToCaptureStateResponse(result.Value));
     }
 
@@ -586,8 +657,354 @@ public static class AgentHttpHostExtensions
 
         var absolutePath = Path.Combine(paths.Uploads, upload.Value.FileName);
         var pasted = await imagePasteService.TryPasteImageAsync(absolutePath, context.RequestAborted);
-        await auditLogStore.WriteAsync("assets.upload-image.accepted", $"assetId={upload.Value.AssetId};pasted={pasted}", context.RequestAborted);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "assets.upload-image.accepted",
+            $"assetId={upload.Value.AssetId};pasted={pasted}");
         return TypedResults.Ok(upload.Value);
+    }
+
+    private static async Task<IResult> ProjectDiffSummaryHandler(
+        HttpContext context,
+        string? projectId,
+        IProjectConfigRepository projectConfigRepository,
+        IGitDiffService gitDiffService)
+    {
+        var projectResult = await ResolveProjectConfigAsync(context, projectId, projectConfigRepository);
+        if (!projectResult.IsSuccess || projectResult.Value is null)
+        {
+            return ErrorFromAgentError(context, projectResult.Error!);
+        }
+
+        var changesResult = await gitDiffService.ListChangedFilesAsync(projectResult.Value, context.RequestAborted);
+        if (!changesResult.IsSuccess || changesResult.Value is null)
+        {
+            return ErrorFromAgentError(context, changesResult.Error ?? new AgentError(
+                Code: "E_PROJECT_GIT_FAILED",
+                Message: "Failed to load project diff.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Verify the project root is a valid git repository."));
+        }
+
+        var changedCount = changesResult.Value.Count;
+        var summary = changedCount == 0
+            ? "No changed files detected."
+            : $"{changedCount} changed file(s) ready for review.";
+
+        return TypedResults.Ok(new ProjectDiffResponse(
+            Ok: true,
+            Status: "ready",
+            Summary: summary,
+            DiffText: null));
+    }
+
+    private static async Task<IResult> ProjectDiffFilesHandler(
+        HttpContext context,
+        string? projectId,
+        IProjectConfigRepository projectConfigRepository,
+        IGitDiffService gitDiffService)
+    {
+        var projectResult = await ResolveProjectConfigAsync(context, projectId, projectConfigRepository);
+        if (!projectResult.IsSuccess || projectResult.Value is null)
+        {
+            return ErrorFromAgentError(context, projectResult.Error!);
+        }
+
+        var changesResult = await gitDiffService.ListChangedFilesAsync(projectResult.Value, context.RequestAborted);
+        if (!changesResult.IsSuccess || changesResult.Value is null)
+        {
+            return ErrorFromAgentError(context, changesResult.Error ?? new AgentError(
+                Code: "E_PROJECT_GIT_FAILED",
+                Message: "Failed to load changed files.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Verify the project root is a valid git repository."));
+        }
+
+        var fileEntries = changesResult.Value
+            .Select(static change => new ProjectDiffFileEntryResponse(
+                Path: change.Path,
+                Status: change.Status,
+                Additions: change.Additions,
+                Deletions: change.Deletions))
+            .ToArray();
+
+        return TypedResults.Ok(new ProjectDiffFilesResponse(
+            Ok: true,
+            ProjectId: projectResult.Value.Id,
+            ProjectName: projectResult.Value.ProjectName,
+            Files: fileEntries));
+    }
+
+    private static async Task<IResult> ProjectDiffFileHandler(
+        HttpContext context,
+        string? projectId,
+        string? path,
+        IProjectConfigRepository projectConfigRepository,
+        IGitDiffService gitDiffService)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PROJECT_INVALID_REQUEST",
+                Message: "path query parameter is required.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Provide a project-relative path from /api/v1/project/diff/files."));
+        }
+
+        var projectResult = await ResolveProjectConfigAsync(context, projectId, projectConfigRepository);
+        if (!projectResult.IsSuccess || projectResult.Value is null)
+        {
+            return ErrorFromAgentError(context, projectResult.Error!);
+        }
+
+        var lineLimit = ResolveDiffLineLimit();
+        var diffResult = await gitDiffService.GetFileDiffAsync(
+            projectResult.Value,
+            path,
+            lineLimit,
+            context.RequestAborted);
+
+        if (!diffResult.IsSuccess || diffResult.Value is null)
+        {
+            return ErrorFromAgentError(context, diffResult.Error ?? new AgentError(
+                Code: "E_PROJECT_GIT_FAILED",
+                Message: "Failed to load file diff.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry with a valid file path from /api/v1/project/diff/files."));
+        }
+
+        var file = diffResult.Value;
+        return TypedResults.Ok(new ProjectDiffFileResponse(
+            Ok: true,
+            ProjectId: projectResult.Value.Id,
+            Path: file.Path,
+            Status: file.Status,
+            Additions: file.Additions,
+            Deletions: file.Deletions,
+            DiffText: file.DiffText,
+            Truncated: file.Truncated,
+            LineLimit: file.LineLimit));
+    }
+
+    private static async Task<IResult> ProjectFilesHandler(
+        HttpContext context,
+        string? projectId,
+        string? query,
+        int? limit,
+        IProjectConfigRepository projectConfigRepository,
+        IProjectFileIndexService projectFileIndexService)
+    {
+        var effectiveLimit = limit ?? 400;
+        if (effectiveLimit <= 0 || effectiveLimit > 2000)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PROJECT_INVALID_REQUEST",
+                Message: "limit must be between 1 and 2000.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry with limit in [1, 2000]."));
+        }
+
+        var projectResult = await ResolveProjectConfigAsync(context, projectId, projectConfigRepository);
+        if (!projectResult.IsSuccess || projectResult.Value is null)
+        {
+            return ErrorFromAgentError(context, projectResult.Error!);
+        }
+
+        var filesResult = await projectFileIndexService.ListFilesAsync(
+            projectResult.Value,
+            query,
+            effectiveLimit,
+            context.RequestAborted);
+        if (!filesResult.IsSuccess || filesResult.Value is null)
+        {
+            return ErrorFromAgentError(context, filesResult.Error ?? new AgentError(
+                Code: "E_PROJECT_GIT_FAILED",
+                Message: "Failed to build project file index.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Verify the project root is a valid git repository."));
+        }
+
+        var files = filesResult.Value
+            .Select(static file => new ProjectIndexedFileResponse(
+                Path: file.Path,
+                Extension: file.Extension,
+                Tracked: file.IsTracked,
+                Changed: file.IsChanged))
+            .ToArray();
+
+        return TypedResults.Ok(new ProjectFilesResponse(
+            Ok: true,
+            ProjectId: projectResult.Value.Id,
+            ProjectName: projectResult.Value.ProjectName,
+            GeneratedAt: DateTimeOffset.UtcNow.ToString("O"),
+            Files: files));
+    }
+
+    private static async Task<IResult> ProjectTestRequestHandler(
+        HttpContext context,
+        ProjectTestRequestBody body,
+        IAuditLogStore auditLogStore)
+    {
+        var scope = NormalizeQueryValue(body.Scope) ?? "changed-modules";
+        var requestId = "testreq_" + Guid.NewGuid().ToString("N");
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "project.test-request.accepted",
+            $"requestId={requestId};scope={scope};status=accepted");
+
+        return TypedResults.Ok(new ProjectTestResponse(
+            Ok: true,
+            Status: "accepted",
+            Message: "Test request submitted.",
+            RequestId: requestId));
+    }
+
+    private static async Task<IResult> ProjectTasksHandler(
+        HttpContext context,
+        int? promptLimit,
+        IAuditLogStore auditLogStore)
+    {
+        var effectivePromptLimit = promptLimit ?? 8;
+        if (effectivePromptLimit <= 0 || effectivePromptLimit > 40)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PROJECT_INVALID_REQUEST",
+                Message: "promptLimit must be between 1 and 40.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry with promptLimit in [1, 40]."));
+        }
+
+        var logs = await auditLogStore.QueryAsync(
+            new AuditLogQuery(Page: 1, PageSize: 240),
+            context.RequestAborted);
+
+        var promptActions = logs.Items
+            .Where(static item =>
+                item.Action.StartsWith("prompt.send", StringComparison.OrdinalIgnoreCase))
+            .Take(effectivePromptLimit)
+            .Select(static item => new ProjectTaskPromptActionResponse(
+                Id: item.Id,
+                Action: item.Action,
+                Details: item.Details,
+                Severity: item.Severity,
+                SessionId: item.SessionId,
+                CreatedAt: item.CreatedAt.ToString("O")))
+            .ToArray();
+
+        var latestTestRequest = logs.Items.FirstOrDefault(static item =>
+            item.Action.StartsWith("project.test-request", StringComparison.OrdinalIgnoreCase));
+        var testRequestDetails = ParseKeyValueDetails(latestTestRequest?.Details);
+        var testRequestStatus = latestTestRequest is null
+            ? new ProjectTestRequestStateResponse(
+                Status: "idle",
+                RequestId: null,
+                Scope: null,
+                Message: "No test request submitted.",
+                RequestedAt: null)
+            : new ProjectTestRequestStateResponse(
+                Status: ResolveTaskStatus(testRequestDetails, "status", "accepted"),
+                RequestId: ResolveTaskStatus(testRequestDetails, "requestId"),
+                Scope: ResolveTaskStatus(testRequestDetails, "scope"),
+                Message: "Latest test request tracked from audit events.",
+                RequestedAt: latestTestRequest.CreatedAt.ToString("O"));
+
+        var latestAction = promptActions.FirstOrDefault()?.Action ?? latestTestRequest?.Action;
+        var updatedAt = promptActions.FirstOrDefault()?.CreatedAt
+            ?? latestTestRequest?.CreatedAt.ToString("O")
+            ?? DateTimeOffset.UtcNow.ToString("O");
+        var taskState = new ProjectTaskStateResponse(
+            Status: latestAction is null ? "idle" : "active",
+            CurrentAction: latestAction,
+            UpdatedAt: updatedAt);
+
+        return TypedResults.Ok(new ProjectTasksResponse(
+            Ok: true,
+            TaskState: taskState,
+            RecentPromptActions: promptActions,
+            TestRequest: testRequestStatus));
+    }
+
+    private static async Task<IResult> NotificationsHandler(
+        HttpContext context,
+        int? limit,
+        IAuditLogStore auditLogStore,
+        INotificationStateStore notificationStateStore)
+    {
+        var effectiveLimit = limit ?? 60;
+        if (effectiveLimit <= 0 || effectiveLimit > 200)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_LOGS_INVALID_REQUEST",
+                Message: "limit must be between 1 and 200.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry with limit in [1, 200]."));
+        }
+
+        var logs = await auditLogStore.QueryAsync(
+            new AuditLogQuery(Page: 1, PageSize: effectiveLimit),
+            context.RequestAborted);
+        var clearedBefore = await notificationStateStore.GetClearedBeforeAsync(context.RequestAborted);
+        var ids = logs.Items.Select(static item => item.Id).ToArray();
+        var readIds = await notificationStateStore.GetReadIdsAsync(ids, context.RequestAborted);
+
+        var items = logs.Items
+            .Select(item =>
+            {
+                var isRead = readIds.Contains(item.Id) ||
+                    (clearedBefore is DateTimeOffset cleared && item.CreatedAt <= cleared);
+                return new NotificationEntryResponse(
+                    Id: item.Id,
+                    Title: BuildNotificationTitle(item.Action),
+                    Message: string.IsNullOrWhiteSpace(item.Details)
+                        ? $"Audit event: {item.Action}"
+                        : item.Details,
+                    Severity: item.Severity,
+                    CreatedAt: item.CreatedAt.ToString("O"),
+                    Read: isRead);
+            })
+            .ToArray();
+
+        var unread = items.Count(static item => !item.Read);
+        return TypedResults.Ok(new NotificationsResponse(
+            Ok: true,
+            Total: items.Length,
+            Unread: unread,
+            Items: items));
+    }
+
+    private static async Task<IResult> NotificationReadHandler(
+        HttpContext context,
+        string notificationId,
+        INotificationStateStore notificationStateStore)
+    {
+        if (string.IsNullOrWhiteSpace(notificationId))
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PROJECT_INVALID_REQUEST",
+                Message: "notificationId is required.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Pass a valid notification id from GET /api/v1/notifications."));
+        }
+
+        await notificationStateStore.MarkReadAsync(notificationId, context.RequestAborted);
+        return TypedResults.Ok(new NotificationReadResponse(
+            Ok: true,
+            Id: notificationId,
+            Read: true));
+    }
+
+    private static async Task<IResult> NotificationClearHandler(
+        HttpContext context,
+        INotificationStateStore notificationStateStore)
+    {
+        var clearedBefore = DateTimeOffset.UtcNow;
+        await notificationStateStore.ClearAllAsync(clearedBefore, context.RequestAborted);
+        return TypedResults.Ok(new NotificationClearResponse(
+            Ok: true,
+            ClearedBefore: clearedBefore.ToString("O")));
     }
 
     private static async Task<IResult> ScreenshotHandler(
@@ -603,7 +1020,11 @@ public static class AgentHttpHostExtensions
             return ErrorFromAgentError(context, screenshot.Error ?? new AgentError("E_CAPTURE_FAILED", "Screenshot failed.", context.GetOrCreateTraceId()));
         }
 
-        await auditLogStore.WriteAsync("media.screenshot.accepted", screenshot.Value.FileName, context.RequestAborted);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "media.screenshot.accepted",
+            screenshot.Value.FileName);
         return TypedResults.Ok(screenshot.Value);
     }
 
@@ -620,7 +1041,11 @@ public static class AgentHttpHostExtensions
             return ErrorFromAgentError(context, result.Error ?? new AgentError("E_RECORDING_BUSY", "Failed to start recording.", context.GetOrCreateTraceId()));
         }
 
-        await auditLogStore.WriteAsync("media.recording.started", result.Value.StartedAt, context.RequestAborted);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "media.recording.started",
+            result.Value.StartedAt);
         return TypedResults.Ok(result.Value);
     }
 
@@ -635,7 +1060,11 @@ public static class AgentHttpHostExtensions
             return ErrorFromAgentError(context, result.Error ?? new AgentError("E_RECORDING_BUSY", "Failed to stop recording.", context.GetOrCreateTraceId()));
         }
 
-        await auditLogStore.WriteAsync("media.recording.stopped", result.Value.FileName, context.RequestAborted);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "media.recording.stopped",
+            result.Value.FileName);
         return TypedResults.Ok(result.Value);
     }
 
@@ -727,6 +1156,129 @@ public static class AgentHttpHostExtensions
             statusCode: StatusCodes.Status202Accepted);
     }
 
+    private static async Task<IResult> LogsHandler(
+        HttpContext context,
+        int? page,
+        int? pageSize,
+        string? severity,
+        string? action,
+        string? sessionId,
+        IAuditLogStore auditLogStore)
+    {
+        var traceId = context.GetOrCreateTraceId();
+        var requestedPage = page ?? 1;
+        var requestedPageSize = pageSize ?? 100;
+
+        if (requestedPage <= 0)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_LOGS_INVALID_REQUEST",
+                Message: "page must be greater than 0.",
+                TraceId: traceId,
+                Hint: "Retry with page >= 1."));
+        }
+
+        if (requestedPageSize <= 0 || requestedPageSize > 200)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_LOGS_INVALID_REQUEST",
+                Message: "pageSize must be between 1 and 200.",
+                TraceId: traceId,
+                Hint: "Retry with pageSize in [1, 200]."));
+        }
+
+        var normalizedSeverity = NormalizeLogSeverityFilter(severity);
+        if (!string.IsNullOrWhiteSpace(severity) && normalizedSeverity is null)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_LOGS_INVALID_REQUEST",
+                Message: "severity must be one of info, warning, error.",
+                TraceId: traceId,
+                Hint: "Retry with severity filter set to info, warning, or error."));
+        }
+
+        var query = new AuditLogQuery(
+            Page: requestedPage,
+            PageSize: requestedPageSize,
+            Severity: normalizedSeverity,
+            Action: NormalizeQueryValue(action),
+            SessionId: NormalizeQueryValue(sessionId));
+
+        var result = await auditLogStore.QueryAsync(query, context.RequestAborted);
+        var items = result.Items
+            .Select(static item => new AgentLogEntryResponse(
+                Id: item.Id,
+                Action: item.Action,
+                Details: item.Details,
+                Severity: item.Severity,
+                SessionId: item.SessionId,
+                CreatedAt: item.CreatedAt.ToString("O")))
+            .ToArray();
+
+        return TypedResults.Ok(new LogsResponse(
+            Ok: true,
+            Page: result.Page,
+            PageSize: result.PageSize,
+            Total: result.Total,
+            HasMore: result.HasMore,
+            Items: items));
+    }
+
+    private static async Task<IResult> GetSettingsHandler(
+        HttpContext context,
+        IAgentSettingsStore settingsStore)
+    {
+        var settings = await settingsStore.GetOrCreateAsync(context.RequestAborted);
+        return TypedResults.Ok(ToSettingsResponse(settings));
+    }
+
+    private static async Task<IResult> PatchSettingsHandler(
+        HttpContext context,
+        SettingsPatchBody body,
+        IAgentSettingsStore settingsStore)
+    {
+        if (body.AgentSettings is null)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_SETTINGS_INVALID_REQUEST",
+                Message: "agentSettings is required.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Provide agentSettings patch body."));
+        }
+
+        var current = await settingsStore.GetOrCreateAsync(context.RequestAborted);
+        var highRiskChanges = ResolveHighRiskChanges(body.AgentSettings, current);
+        if (highRiskChanges.Count > 0 && !body.ConfirmHighRisk)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_SETTINGS_CONFIRM_REQUIRED",
+                Message: "High-risk settings require confirmHighRisk=true.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: $"High-risk keys: {string.Join(", ", highRiskChanges)}"));
+        }
+
+        var update = new AgentSettingsUpdate(
+            HttpPort: body.AgentSettings.HttpPort,
+            DirectTestCommand: body.AgentSettings.DirectTestCommand,
+            AllowFullscreenCapture: body.AgentSettings.AllowFullscreenCapture,
+            AllowClearLogs: body.AgentSettings.AllowClearLogs,
+            DefaultCaptureMode: body.AgentSettings.DefaultCaptureMode);
+
+        try
+        {
+            var updated = await settingsStore.UpdateAsync(update, context.RequestAborted);
+            return TypedResults.Ok(ToSettingsResponse(updated));
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_SETTINGS_INVALID_REQUEST",
+                Message: ex.Message,
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Review provided settings values and retry."));
+        }
+    }
+
     private static IResult InvalidPairingPayload(HttpContext context, string message)
     {
         var traceId = context.GetOrCreateTraceId();
@@ -757,6 +1309,14 @@ public static class AgentHttpHostExtensions
             "E_UPLOAD_TOO_LARGE" => StatusCodes.Status413PayloadTooLarge,
             "E_RECORDING_BUSY" => StatusCodes.Status409Conflict,
             "E_DISK_LOW" => StatusCodes.Status507InsufficientStorage,
+            "E_PROJECT_INVALID_REQUEST" => StatusCodes.Status400BadRequest,
+            "E_PROJECT_NOT_FOUND" => StatusCodes.Status404NotFound,
+            "E_DIFF_PATH_INVALID" => StatusCodes.Status400BadRequest,
+            "E_DIFF_FILE_NOT_FOUND" => StatusCodes.Status404NotFound,
+            "E_PROJECT_GIT_FAILED" => StatusCodes.Status500InternalServerError,
+            "E_LOGS_INVALID_REQUEST" => StatusCodes.Status400BadRequest,
+            "E_SETTINGS_INVALID_REQUEST" => StatusCodes.Status400BadRequest,
+            "E_SETTINGS_CONFIRM_REQUIRED" => StatusCodes.Status409Conflict,
             _ => StatusCodes.Status400BadRequest
         };
 
@@ -836,7 +1396,12 @@ public static class AgentHttpHostExtensions
         var window = await locator.GetWindowAsync(context.RequestAborted);
         if (window.WindowId is null || window.Status is "not_found" or "multiple_candidates" or "permission_issue")
         {
-            await auditLogStore.WriteAsync("input.rejected", $"reason={window.Status}", context.RequestAborted);
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "input.rejected",
+                $"reason={window.Status}",
+                severity: "warning");
             return (false, null, ErrorFromAgentError(context, new AgentError(
                 Code: "E_CODEX_NOT_FOUND",
                 Message: "Codex window is not available.",
@@ -846,7 +1411,12 @@ public static class AgentHttpHostExtensions
 
         if (string.Equals(window.Status, "minimized", StringComparison.OrdinalIgnoreCase))
         {
-            await auditLogStore.WriteAsync("input.rejected", "reason=minimized", context.RequestAborted);
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "input.rejected",
+                "reason=minimized",
+                severity: "warning");
             return (false, null, ErrorFromAgentError(context, new AgentError(
                 Code: "E_CODEX_MINIMIZED",
                 Message: "Codex window is minimized.",
@@ -857,7 +1427,12 @@ public static class AgentHttpHostExtensions
         var lockResult = lockService.AcquireForInput(window.WindowId, device.DeviceId, DateTimeOffset.UtcNow);
         if (!lockResult.IsGranted)
         {
-            await auditLogStore.WriteAsync("input.rejected", $"reason={lockResult.Reason};active={lockResult.ActiveDeviceId}", context.RequestAborted);
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "input.rejected",
+                $"reason={lockResult.Reason};active={lockResult.ActiveDeviceId}",
+                severity: "warning");
             return (false, null, ErrorFromAgentError(context, new AgentError(
                 Code: "E_INPUT_BLOCKED",
                 Message: "Another device currently controls input.",
@@ -867,7 +1442,11 @@ public static class AgentHttpHostExtensions
 
         if (lockResult.OwnershipChanged)
         {
-            await auditLogStore.WriteAsync("session_lock.changed", $"window={window.WindowId};device={device.DeviceId}", context.RequestAborted);
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "session_lock.changed",
+                $"window={window.WindowId};device={device.DeviceId}");
         }
 
         var executionContext = new InputExecutionContext(
@@ -875,6 +1454,52 @@ public static class AgentHttpHostExtensions
             DeviceId: device.DeviceId,
             TraceId: context.GetOrCreateTraceId());
         return (true, executionContext, null);
+    }
+
+    private static async Task<Result<ProjectConfigRecord>> ResolveProjectConfigAsync(
+        HttpContext context,
+        string? projectId,
+        IProjectConfigRepository projectConfigRepository)
+    {
+        var normalizedProjectId = NormalizeQueryValue(projectId);
+        if (normalizedProjectId is null)
+        {
+            var defaultProject = await projectConfigRepository.GetOrCreateDefaultAsync(context.RequestAborted);
+            return Result<ProjectConfigRecord>.Success(defaultProject);
+        }
+
+        var project = await projectConfigRepository.FindByIdAsync(normalizedProjectId, context.RequestAborted);
+        if (project is null &&
+            string.Equals(
+                normalizedProjectId,
+                SqliteProjectConfigRepository.DefaultProjectId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var defaultProject = await projectConfigRepository.GetOrCreateDefaultAsync(context.RequestAborted);
+            return Result<ProjectConfigRecord>.Success(defaultProject);
+        }
+
+        if (project is null)
+        {
+            return Result<ProjectConfigRecord>.Failure(new AgentError(
+                Code: "E_PROJECT_NOT_FOUND",
+                Message: $"Project '{normalizedProjectId}' was not found.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Use a valid projectId from local project configuration."));
+        }
+
+        return Result<ProjectConfigRecord>.Success(project);
+    }
+
+    private static int ResolveDiffLineLimit()
+    {
+        var configured = Environment.GetEnvironmentVariable("CERYX_DIFF_LINE_LIMIT");
+        if (int.TryParse(configured, out var parsed) && parsed > 0)
+        {
+            return parsed;
+        }
+
+        return 1200;
     }
 
     private static bool IsLocalManagementRequest(HttpContext context)
@@ -898,5 +1523,175 @@ public static class AgentHttpHostExtensions
         }
 
         return IPAddress.IsLoopback(remoteIp);
+    }
+
+    private static async Task WriteAuditAsync(
+        IAuditLogStore auditLogStore,
+        HttpContext context,
+        string action,
+        string details,
+        string severity = "info")
+    {
+        await auditLogStore.WriteAsync(
+            action,
+            details,
+            severity,
+            ResolveAuditSessionId(context),
+            context.RequestAborted);
+    }
+
+    private static string ResolveAuditSessionId(HttpContext context)
+    {
+        return context.GetAuthenticatedDevice()?.DeviceId ?? "local";
+    }
+
+    private static string? NormalizeQueryValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
+
+    private static string? NormalizeLogSeverityFilter(string? severity)
+    {
+        var normalized = NormalizeQueryValue(severity)?.ToLowerInvariant();
+        return normalized switch
+        {
+            null => null,
+            "info" => "info",
+            "warning" => "warning",
+            "error" => "error",
+            _ => null
+        };
+    }
+
+    private static string BuildNotificationTitle(string action)
+    {
+        if (string.IsNullOrWhiteSpace(action))
+        {
+            return "System Notification";
+        }
+
+        if (action.StartsWith("prompt.send", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Prompt Action";
+        }
+
+        if (action.StartsWith("project.test-request", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Test Request";
+        }
+
+        if (action.StartsWith("media.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Media Action";
+        }
+
+        if (action.StartsWith("input.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Input Action";
+        }
+
+        if (action.StartsWith("capture.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Capture Action";
+        }
+
+        return "System Action";
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseKeyValueDetails(string? details)
+    {
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var segment in details.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separatorIndex = segment.IndexOf('=');
+            if (separatorIndex <= 0 || separatorIndex >= segment.Length - 1)
+            {
+                continue;
+            }
+
+            var key = segment[..separatorIndex].Trim();
+            var value = segment[(separatorIndex + 1)..].Trim();
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                result[key] = value;
+            }
+        }
+
+        return result;
+    }
+
+    private static string ResolveTaskStatus(
+        IReadOnlyDictionary<string, string> values,
+        string key,
+        string fallback = "")
+    {
+        return values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : fallback;
+    }
+
+    private static SettingsResponse ToSettingsResponse(AgentSettingsRecord settings)
+    {
+        return new SettingsResponse(
+            Ok: true,
+            UpdatedAt: settings.UpdatedAt.ToString("O"),
+            AgentSettings: new AgentSettingsStateResponse(
+                HttpPort: settings.HttpPort,
+                DirectTestCommand: settings.DirectTestCommand,
+                AllowFullscreenCapture: settings.AllowFullscreenCapture,
+                AllowClearLogs: settings.AllowClearLogs,
+                DefaultCaptureMode: settings.DefaultCaptureMode),
+            ClientSettings: new ClientSettingsStateResponse(
+                Theme: "system",
+                CompactMode: false,
+                ShowLatency: true,
+                KeyboardShortcuts: true,
+                NotificationsEnabled: true,
+                LogsAutoRefresh: true));
+    }
+
+    private static IReadOnlyList<string> ResolveHighRiskChanges(
+        AgentSettingsPatchBody patch,
+        AgentSettingsRecord current)
+    {
+        var risks = new List<string>();
+
+        if (patch.HttpPort is int httpPort && httpPort != current.HttpPort)
+        {
+            risks.Add("httpPort");
+        }
+
+        if (patch.DirectTestCommand is not null &&
+            !string.Equals(
+                patch.DirectTestCommand.Trim(),
+                current.DirectTestCommand,
+                StringComparison.Ordinal))
+        {
+            risks.Add("directTestCommand");
+        }
+
+        if (patch.AllowFullscreenCapture is bool allowFullscreenCapture &&
+            allowFullscreenCapture != current.AllowFullscreenCapture)
+        {
+            risks.Add("allowFullscreenCapture");
+        }
+
+        if (patch.AllowClearLogs is bool allowClearLogs &&
+            allowClearLogs != current.AllowClearLogs)
+        {
+            risks.Add("allowClearLogs");
+        }
+
+        return risks;
     }
 }

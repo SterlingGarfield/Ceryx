@@ -10,16 +10,27 @@
     }
   },
   "scripts": {
-    "prebuild": "pnpm --filter @ceryx/client-sdk build",
+    "prebuild": "pnpm --filter @ceryx/ui build && pnpm --filter @ceryx/client-sdk build",
     "build": "tsc -p tsconfig.json",
-    "pretypecheck": "pnpm --filter @ceryx/client-sdk build",
+    "pretypecheck": "pnpm --filter @ceryx/ui build && pnpm --filter @ceryx/client-sdk build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "pretest": "pnpm --filter @ceryx/client-sdk build",
-    "test": "vitest run --pool=threads"
+    "pretest": "pnpm --filter @ceryx/ui build && pnpm --filter @ceryx/client-sdk build",
+    "test": "vitest run --pool=threads --environment jsdom"
   },
   "dependencies": {
     "@ceryx/client-sdk": "workspace:^",
+    "@ceryx/design-tokens": "workspace:*",
     "@ceryx/protocol": "workspace:^",
+    "@ceryx/ui": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "jsdom": "^26.1.0"
   }
 }

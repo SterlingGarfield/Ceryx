@@ -1,11 +1,31 @@
 import {
   AgentClient,
+  type AgentSettingsPatch,
   type AgentStatus,
+  type CaptureStateResponse,
+  type CodexWindowSnapshot,
+  type InputActionResponse,
+  type LogsQuery,
+  type LogsResponse,
+  type NotificationClearResponse,
+  type NotificationReadResponse,
+  type NotificationsResponse,
+  type ProjectDiffFileResponse,
+  type ProjectDiffFilesResponse,
+  type ProjectFilesResponse,
+  type ProjectTasksResponse,
   type PairingConfirmResponse,
   type PairingConfirmRejectedResponse,
   type PairingRequestResponse,
+  type ProjectDiffResponse,
+  type PromptSendResponse,
+  type RecordingStartResponse,
+  type RecordingStopResponse,
+  type SettingsResponse,
+  type ScreenshotResponse,
   type TrustedDevice,
-  type PairingRequestRejectedResponse
+  type PairingRequestRejectedResponse,
+  type UploadImageResponse
 } from "@ceryx/client-sdk";
 import {
   clearDeviceToken,
@@ -93,4 +113,160 @@ export async function confirmPairing(
   request: { pairingId: string; code: string }
 ): Promise<PairingConfirmResponse | PairingConfirmRejectedResponse> {
   return createClient(baseUrl).confirmPairing(request);
+}
+
+export async function getCodexWindow(baseUrl: string): Promise<CodexWindowSnapshot> {
+  return createClient(baseUrl).getCodexWindow();
+}
+
+export async function refreshCodexWindow(baseUrl: string): Promise<CodexWindowSnapshot> {
+  return createClient(baseUrl).refreshCodexWindow();
+}
+
+export async function getCaptureState(baseUrl: string): Promise<CaptureStateResponse> {
+  return createClient(baseUrl).getCaptureState();
+}
+
+export async function startCapture(baseUrl: string): Promise<CaptureStateResponse> {
+  return createClient(baseUrl).startCapture({
+    mode: "balanced",
+    target: "codex_window"
+  });
+}
+
+export async function stopCapture(baseUrl: string): Promise<CaptureStateResponse> {
+  return createClient(baseUrl).stopCapture();
+}
+
+export async function sendPrompt(
+  baseUrl: string,
+  request: { prompt: string; submit: boolean }
+): Promise<PromptSendResponse> {
+  return createClient(baseUrl).sendPrompt(request);
+}
+
+export async function requestDiff(baseUrl: string): Promise<ProjectDiffResponse> {
+  return createClient(baseUrl).getProjectDiff();
+}
+
+export async function requestDiffFiles(
+  baseUrl: string,
+  projectId = "workspace-default"
+): Promise<ProjectDiffFilesResponse> {
+  return createClient(baseUrl).getProjectDiffFiles(projectId);
+}
+
+export async function requestDiffFile(
+  baseUrl: string,
+  projectId: string,
+  path: string
+): Promise<ProjectDiffFileResponse> {
+  return createClient(baseUrl).getProjectDiffFile(projectId, path);
+}
+
+export async function requestLogs(
+  baseUrl: string,
+  query: LogsQuery = {}
+): Promise<LogsResponse> {
+  return createClient(baseUrl).getLogs(query);
+}
+
+export async function requestProjectFiles(
+  baseUrl: string,
+  projectId = "workspace-default",
+  options: { query?: string; limit?: number } = {}
+): Promise<ProjectFilesResponse> {
+  return createClient(baseUrl).getProjectFiles(projectId, options);
+}
+
+export async function requestProjectTasks(
+  baseUrl: string,
+  promptLimit = 8
+): Promise<ProjectTasksResponse> {
+  return createClient(baseUrl).getProjectTasks(promptLimit);
+}
+
+export async function requestNotifications(
+  baseUrl: string,
+  limit = 80
+): Promise<NotificationsResponse> {
+  return createClient(baseUrl).getNotifications(limit);
+}
+
+export async function markNotificationRead(
+  baseUrl: string,
+  notificationId: string
+): Promise<NotificationReadResponse> {
+  return createClient(baseUrl).markNotificationRead(notificationId);
+}
+
+export async function clearNotifications(
+  baseUrl: string
+): Promise<NotificationClearResponse> {
+  return createClient(baseUrl).clearNotifications();
+}
+
+export async function requestSettings(baseUrl: string): Promise<SettingsResponse> {
+  return createClient(baseUrl).getSettings();
+}
+
+export async function patchAgentSettings(
+  baseUrl: string,
+  patch: AgentSettingsPatch,
+  confirmHighRisk = false
+): Promise<SettingsResponse> {
+  return createClient(baseUrl).patchAgentSettings(patch, confirmHighRisk);
+}
+
+export async function takeScreenshot(baseUrl: string): Promise<ScreenshotResponse> {
+  return createClient(baseUrl).screenshot();
+}
+
+export async function startRecordingCapture(baseUrl: string): Promise<RecordingStartResponse> {
+  return createClient(baseUrl).startRecording();
+}
+
+export async function stopRecordingCapture(baseUrl: string): Promise<RecordingStopResponse> {
+  return createClient(baseUrl).stopRecording();
+}
+
+export async function sendMouseInput(
+  baseUrl: string,
+  request: { x: number; y: number; button: string; action: string }
+): Promise<InputActionResponse> {
+  return createClient(baseUrl).inputMouse({
+    x: request.x,
+    y: request.y,
+    button: request.button,
+    action: request.action
+  });
+}
+
+export async function sendScrollInput(
+  baseUrl: string,
+  request: { deltaX: number; deltaY: number }
+): Promise<InputActionResponse> {
+  return createClient(baseUrl).inputScroll({
+    deltaX: request.deltaX,
+    deltaY: request.deltaY
+  });
+}
+
+export async function sendHotkeyInput(
+  baseUrl: string,
+  request: { keys: string[] }
+): Promise<InputActionResponse> {
+  return createClient(baseUrl).inputHotkey({
+    keys: request.keys
+  });
+}
+
+export async function uploadImageAsset(
+  baseUrl: string,
+  file: File
+): Promise<UploadImageResponse> {
+  return createClient(baseUrl).uploadImage({
+    fileName: file.name,
+    content: file
+  });
 }

@@ -9,12 +9,15 @@ using Ceryx.Agent.Core;
 using Ceryx.Agent.Media;
 using Ceryx.Agent.Network;
 using Ceryx.Agent.Network.Discovery;
+using Ceryx.Agent.Project;
 using Ceryx.Agent.Security.Devices;
 using Ceryx.Agent.Security.Pairing;
 using Ceryx.Agent.Security.Tokens;
 using Ceryx.Agent.Storage;
 using Ceryx.Agent.Storage.Audit;
 using Ceryx.Agent.Storage.Devices;
+using Ceryx.Agent.Storage.Notifications;
+using Ceryx.Agent.Storage.Settings;
 using Ceryx.Agent.Storage.Sqlite;
 using Serilog;
 using Serilog.Events;
@@ -50,6 +53,7 @@ try
     builder.Services.AddSingleton<SqliteConnectionFactory>();
     builder.Services.AddSingleton<ITrustedDeviceStore, SqliteTrustedDeviceStore>();
     builder.Services.AddSingleton<IAuditLogStore, SqliteAuditLogStore>();
+    builder.Services.AddSingleton<IAgentSettingsStore, SqliteAgentSettingsStore>();
     builder.Services.AddSingleton<IDeviceTokenGenerator, DeviceTokenGenerator>();
     builder.Services.AddSingleton<IDeviceTokenHasher, DeviceTokenHasher>();
     builder.Services.AddSingleton<IDefaultPermissionPolicy, DefaultPermissionPolicy>();
@@ -68,6 +72,11 @@ try
     builder.Services.AddSingleton<IUploadImageService, UploadImageService>();
     builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
     builder.Services.AddSingleton<IRecordingService, RecordingService>();
+    builder.Services.AddSingleton<IProjectConfigRepository, SqliteProjectConfigRepository>();
+    builder.Services.AddSingleton<IGitCommandService, GitCommandService>();
+    builder.Services.AddSingleton<IGitDiffService, GitDiffService>();
+    builder.Services.AddSingleton<IProjectFileIndexService, ProjectFileIndexService>();
+    builder.Services.AddSingleton<INotificationStateStore, SqliteNotificationStateStore>();
     builder.Services.AddSingleton<IAgentTrayShell, AgentTrayShell>();
 
     var app = builder.Build();

@@ -39,3 +39,5 @@ _tmp_*
 # local workspace data and tool caches
 .cache/
 .workspace-data/
+apps/*/.cache-verify/
+apps/*/.cache-verify-node/

@@ -12,6 +12,7 @@ public sealed class DefaultPermissionPolicy : IDefaultPermissionPolicy
     private static readonly IReadOnlyList<Permission> IpadPermissions =
     [
         Permission.ViewWindow,
+        Permission.ControlInput,
         Permission.SendPrompt,
         Permission.UploadImage,
         Permission.ReadDiff,

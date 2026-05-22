@@ -277,4 +277,399 @@ describe("AgentClient", () => {
     });
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ prompt: "run tests", submit: true }));
   });
+
+  it("posts local management action to restart endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          action: "restart-request",
+          status: "accepted",
+          executed: false,
+          message: "Restart request accepted but not executed in development mode."
+        });
+      }
+    });
+
+    const response = await client.restartRequest();
+
+    expect(response.ok).toBe(true);
+    expect(response.action).toBe("restart-request");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/agent/restart-request");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.headers).toMatchObject({
+      Accept: "application/json",
+      Authorization: "Bearer token_123"
+    });
+  });
+
+  it("posts local logs action to open logs endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          action: "open-logs-folder",
+          status: "applied",
+          executed: true,
+          message: "Open logs folder request forwarded to local shell."
+        });
+      }
+    });
+
+    const response = await client.openLogsFolder();
+
+    expect(response.ok).toBe(true);
+    expect(response.action).toBe("open-logs-folder");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/agent/open-logs-folder");
+    expect(calls[0]?.init?.method).toBe("POST");
+  });
+
+  it("requests paginated logs with filters", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          page: 2,
+          pageSize: 50,
+          total: 120,
+          hasMore: true,
+          items: [
+            {
+              id: "audit_1",
+              action: "prompt.send.accepted",
+              details: "submitted=true",
+              severity: "info",
+              sessionId: "dev_test_001",
+              createdAt: "2026-05-22T02:00:00.000Z"
+            }
+          ]
+        });
+      }
+    });
+
+    const response = await client.getLogs({
+      page: 2,
+      pageSize: 50,
+      severity: "warning",
+      action: "input.rejected",
+      sessionId: "dev_test_001"
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.items).toHaveLength(1);
+    expect(calls[0]?.url).toBe(
+      "http://127.0.0.1:41527/api/v1/logs?page=2&pageSize=50&severity=warning&action=input.rejected&sessionId=dev_test_001"
+    );
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("gets split settings payload", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          updatedAt: "2026-05-22T02:10:00.000Z",
+          agentSettings: {
+            httpPort: 41527,
+            directTestCommand: "dotnet test agent/windows/Ceryx.Agent.Windows.sln",
+            allowFullscreenCapture: false,
+            allowClearLogs: false,
+            defaultCaptureMode: "balanced"
+          },
+          clientSettings: {
+            theme: "system",
+            compactMode: false,
+            showLatency: true,
+            keyboardShortcuts: true,
+            notificationsEnabled: true,
+            logsAutoRefresh: true
+          }
+        });
+      }
+    });
+
+    const response = await client.getSettings();
+
+    expect(response.ok).toBe(true);
+    expect(response.agentSettings.httpPort).toBe(41527);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/settings");
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("patches agent settings with high-risk confirmation", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          updatedAt: "2026-05-22T02:11:00.000Z",
+          agentSettings: {
+            httpPort: 41528,
+            directTestCommand: "dotnet test agent/windows/Ceryx.Agent.Windows.sln --filter Settings",
+            allowFullscreenCapture: true,
+            allowClearLogs: true,
+            defaultCaptureMode: "balanced"
+          },
+          clientSettings: {
+            theme: "system",
+            compactMode: false,
+            showLatency: true,
+            keyboardShortcuts: true,
+            notificationsEnabled: true,
+            logsAutoRefresh: true
+          }
+        });
+      }
+    });
+
+    const response = await client.patchAgentSettings(
+      {
+        httpPort: 41528,
+        allowFullscreenCapture: true,
+        allowClearLogs: true
+      },
+      true
+    );
+
+    expect(response.ok).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/settings");
+    expect(calls[0]?.init?.method).toBe("PATCH");
+    expect(calls[0]?.init?.body).toBe(
+      JSON.stringify({
+        agentSettings: {
+          httpPort: 41528,
+          allowFullscreenCapture: true,
+          allowClearLogs: true
+        },
+        confirmHighRisk: true
+      })
+    );
+  });
+
+  it("requests project diff from diff endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          status: "ready",
+          summary: "2 files changed"
+        });
+      }
+    });
+
+    const response = await client.getProjectDiff();
+
+    expect(response.ok).toBe(true);
+    expect(response.summary).toBe("2 files changed");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/project/diff");
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("requests project diff files for selected project", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          projectId: "workspace-default",
+          projectName: "CeryxProject",
+          files: [{ path: "src/main.ts", status: "modified", additions: 3, deletions: 1 }]
+        });
+      }
+    });
+
+    const response = await client.getProjectDiffFiles("workspace-default");
+
+    expect(response.ok).toBe(true);
+    expect(response.files).toHaveLength(1);
+    expect(calls[0]?.url).toBe(
+      "http://127.0.0.1:41527/api/v1/project/diff/files?projectId=workspace-default"
+    );
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("requests single project diff file payload", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          projectId: "workspace-default",
+          path: "src/main.ts",
+          status: "modified",
+          additions: 3,
+          deletions: 1,
+          diffText: "@@ -1 +1 @@\n-a\n+b",
+          truncated: false,
+          lineLimit: 1200
+        });
+      }
+    });
+
+    const response = await client.getProjectDiffFile("workspace-default", "src/main.ts");
+
+    expect(response.ok).toBe(true);
+    expect(response.path).toBe("src/main.ts");
+    expect(calls[0]?.url).toBe(
+      "http://127.0.0.1:41527/api/v1/project/diff/file?projectId=workspace-default&path=src%2Fmain.ts"
+    );
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("posts project test request to test endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          status: "accepted",
+          message: "queued"
+        });
+      }
+    });
+
+    const response = await client.requestProjectTest({ scope: "changed-modules" });
+
+    expect(response.ok).toBe(true);
+    expect(response.status).toBe("accepted");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/project/test-request");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ scope: "changed-modules" }));
+  });
+
+  it("requests project file index with query and limit", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          projectId: "workspace-default",
+          projectName: "CeryxProject",
+          generatedAt: "2026-05-22T05:20:00.000Z",
+          files: [
+            {
+              path: "apps/desktop/src/App.tsx",
+              extension: "tsx",
+              tracked: true,
+              changed: true
+            }
+          ]
+        });
+      }
+    });
+
+    const response = await client.getProjectFiles("workspace-default", {
+      query: "App",
+      limit: 120
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.files).toHaveLength(1);
+    expect(calls[0]?.url).toBe(
+      "http://127.0.0.1:41527/api/v1/project/files?projectId=workspace-default&query=App&limit=120"
+    );
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("reads tasks snapshot and notification actions", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          taskState: {
+            status: "active",
+            currentAction: "prompt.send.accepted",
+            updatedAt: "2026-05-22T05:30:00.000Z"
+          },
+          recentPromptActions: [],
+          testRequest: {
+            status: "accepted",
+            requestId: "testreq_001",
+            scope: "changed-modules",
+            message: "queued",
+            requestedAt: "2026-05-22T05:30:00.000Z"
+          }
+        });
+      }
+    });
+
+    const response = await client.getProjectTasks(6);
+
+    expect(response.ok).toBe(true);
+    expect(response.testRequest.status).toBe("accepted");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/project/tasks?promptLimit=6");
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("marks and clears notifications", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).includes("/read")) {
+          return Response.json({
+            ok: true,
+            id: "audit_01",
+            read: true
+          });
+        }
+
+        return Response.json({
+          ok: true,
+          clearedBefore: "2026-05-22T05:40:00.000Z"
+        });
+      }
+    });
+
+    const readResponse = await client.markNotificationRead("audit_01");
+    const clearResponse = await client.clearNotifications();
+
+    expect(readResponse.read).toBe(true);
+    expect(clearResponse.ok).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/notifications/audit_01/read");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[1]?.url).toBe("http://127.0.0.1:41527/api/v1/notifications/clear");
+    expect(calls[1]?.init?.method).toBe("POST");
+  });
 });

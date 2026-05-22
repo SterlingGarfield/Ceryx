@@ -71,12 +71,15 @@ public sealed class StorageBootstrapper
               id TEXT PRIMARY KEY,
               action TEXT NOT NULL,
               details TEXT NOT NULL DEFAULT '',
+              severity TEXT NOT NULL DEFAULT 'info',
+              session_id TEXT NOT NULL DEFAULT '',
               created_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS project_configs (
               id TEXT PRIMARY KEY,
               project_name TEXT NOT NULL,
+              project_root TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
 
@@ -84,6 +87,26 @@ public sealed class StorageBootstrapper
               id TEXT PRIMARY KEY,
               asset_type TEXT NOT NULL,
               created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_settings (
+              id TEXT PRIMARY KEY,
+              http_port INTEGER NOT NULL DEFAULT 41527,
+              direct_test_command TEXT NOT NULL DEFAULT 'dotnet test agent/windows/Ceryx.Agent.Windows.sln',
+              allow_fullscreen_capture INTEGER NOT NULL DEFAULT 0,
+              allow_clear_logs INTEGER NOT NULL DEFAULT 0,
+              default_capture_mode TEXT NOT NULL DEFAULT 'balanced',
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS notification_reads (
+              notification_id TEXT PRIMARY KEY,
+              read_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS notification_state (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              cleared_before TEXT
             );
             """;
 
@@ -130,6 +153,74 @@ public sealed class StorageBootstrapper
             "TEXT NOT NULL DEFAULT ''",
             cancellationToken,
             tableName: "audit_logs");
+        await AddColumnIfMissingAsync(
+            connection,
+            auditColumns,
+            "severity",
+            "TEXT NOT NULL DEFAULT 'info'",
+            cancellationToken,
+            tableName: "audit_logs");
+        await AddColumnIfMissingAsync(
+            connection,
+            auditColumns,
+            "session_id",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken,
+            tableName: "audit_logs");
+        await EnsureAuditLogIndexesAsync(connection, cancellationToken);
+
+        var projectConfigColumns = await ReadTableColumnsAsync(connection, "project_configs", cancellationToken);
+        await AddColumnIfMissingAsync(
+            connection,
+            projectConfigColumns,
+            "project_root",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken,
+            tableName: "project_configs");
+
+        var agentSettingsColumns = await ReadTableColumnsAsync(connection, "agent_settings", cancellationToken);
+        await AddColumnIfMissingAsync(
+            connection,
+            agentSettingsColumns,
+            "http_port",
+            "INTEGER NOT NULL DEFAULT 41527",
+            cancellationToken,
+            tableName: "agent_settings");
+        await AddColumnIfMissingAsync(
+            connection,
+            agentSettingsColumns,
+            "direct_test_command",
+            "TEXT NOT NULL DEFAULT 'dotnet test agent/windows/Ceryx.Agent.Windows.sln'",
+            cancellationToken,
+            tableName: "agent_settings");
+        await AddColumnIfMissingAsync(
+            connection,
+            agentSettingsColumns,
+            "allow_fullscreen_capture",
+            "INTEGER NOT NULL DEFAULT 0",
+            cancellationToken,
+            tableName: "agent_settings");
+        await AddColumnIfMissingAsync(
+            connection,
+            agentSettingsColumns,
+            "allow_clear_logs",
+            "INTEGER NOT NULL DEFAULT 0",
+            cancellationToken,
+            tableName: "agent_settings");
+        await AddColumnIfMissingAsync(
+            connection,
+            agentSettingsColumns,
+            "default_capture_mode",
+            "TEXT NOT NULL DEFAULT 'balanced'",
+            cancellationToken,
+            tableName: "agent_settings");
+        await AddColumnIfMissingAsync(
+            connection,
+            agentSettingsColumns,
+            "updated_at",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken,
+            tableName: "agent_settings");
     }
 
     private static async Task<HashSet<string>> ReadTableColumnsAsync(
@@ -177,5 +268,24 @@ public sealed class StorageBootstrapper
         }
 
         existingColumns.Add(columnName);
+    }
+
+    private static async Task EnsureAuditLogIndexesAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var createdAtIndex = connection.CreateCommand();
+        createdAtIndex.CommandText = """
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
+            ON audit_logs(created_at DESC);
+            """;
+        await createdAtIndex.ExecuteNonQueryAsync(cancellationToken);
+
+        var filterIndex = connection.CreateCommand();
+        filterIndex.CommandText = """
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_filters
+            ON audit_logs(severity, action, session_id, created_at DESC);
+            """;
+        await filterIndex.ExecuteNonQueryAsync(cancellationToken);
     }
 }

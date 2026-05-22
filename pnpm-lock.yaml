@@ -26,9 +26,15 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@ceryx/client-sdk':
+        specifier: workspace:^
+        version: link:../../packages/client-sdk
       '@ceryx/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@ceryx/feature-remote-control':
+        specifier: workspace:^
+        version: link:../../packages/feature-remote-control
       '@ceryx/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -38,7 +44,16 @@ importers:
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
+      react-router-dom:
+        specifier: ^6.28.1
+        version: 6.30.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
+      '@testing-library/jest-dom':
+        specifier: ^6.9.1
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: ^16.3.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@types/react':
         specifier: ^18.3.18
         version: 18.3.28
@@ -48,6 +63,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.5.2
         version: 4.7.0(vite@7.3.3(@types/node@22.19.19))
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
       vite:
         specifier: ^7.2.0
         version: 7.3.3(@types/node@22.19.19)
@@ -63,6 +81,9 @@ importers:
       '@ceryx/feature-remote-control':
         specifier: workspace:^
         version: link:../../packages/feature-remote-control
+      '@ceryx/protocol':
+        specifier: workspace:^
+        version: link:../../packages/protocol
       '@ceryx/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -115,12 +136,40 @@ importers:
       '@ceryx/client-sdk':
         specifier: workspace:^
         version: link:../client-sdk
+      '@ceryx/design-tokens':
+        specifier: workspace:*
+        version: link:../design-tokens
       '@ceryx/protocol':
         specifier: workspace:^
         version: link:../protocol
+      '@ceryx/ui':
+        specifier: workspace:*
+        version: link:../ui
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
       zustand:
         specifier: ^5.0.13
         version: 5.0.13(@types/react@18.3.28)(react@18.3.1)
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: ^6.9.1
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: ^16.3.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/react':
+        specifier: ^18.3.18
+        version: 18.3.28
+      '@types/react-dom':
+        specifier: ^18.3.5
+        version: 18.3.7(@types/react@18.3.28)
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
 
   packages/feature-settings: {}
 

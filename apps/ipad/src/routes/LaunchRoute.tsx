@@ -33,6 +33,14 @@ export function LaunchRoute() {
           >
             Go to Connections
           </Button>
+          <Button
+            size="ipad"
+            variant="secondary"
+            style={{ minWidth: 168 }}
+            onClick={() => navigate("/console")}
+          >
+            Open Live Console
+          </Button>
         </div>
       </Panel>
     </section>

@@ -1,5 +1,9 @@
 export const remoteControlFeatureName = "feature-remote-control";
 
+export * from "./CodexToolbar";
+export * from "./PromptComposer";
+export * from "./RemoteViewport";
+export * from "./defaultPermissions";
 export * from "./stores/useConnectionStore";
 export * from "./stores/usePairingStore";
 export * from "./stores/usePromptStore";
