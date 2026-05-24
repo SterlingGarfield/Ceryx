@@ -20,6 +20,7 @@ import {
   RemoteViewport,
   defaultPermissionsForClient,
   hasPermission,
+  resolveProtocolError,
   useConnectionStore,
   usePromptStore,
   useRemoteSessionStore
@@ -128,6 +129,7 @@ export function ConsoleRoute() {
   const [recordingActive, setRecordingActive] = useState(false);
   const [toolbarBusy, setToolbarBusy] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [tokenState, setTokenState] = useState<"missing" | "valid" | "invalid" | "expired">("missing");
   const [viewportMenu, setViewportMenu] = useState<ViewportMenuState | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readPersistedWidth(sidebarWidthKey, defaultSidebarWidth, 180, 320)
@@ -203,10 +205,46 @@ export function ConsoleRoute() {
     writePersistedWidth(inspectorWidthKey, inspectorWidth);
   }, [inspectorWidth]);
 
+  function resolveErrorMessage(error: unknown, fallback: string): string {
+    return resolveProtocolError(error, fallback).message;
+  }
+
+  function applyConsoleError(error: unknown, fallback: string): string {
+    const resolved = resolveProtocolError(error, fallback);
+
+    switch (resolved.state) {
+      case "agent_offline":
+        setCodexStatus("not_found");
+        setCodexTitle("Local Agent offline");
+        break;
+      case "not_paired":
+      case "token_invalid":
+        setCodexStatus("unpaired");
+        setCodexTitle("Pairing required");
+        break;
+      case "codex_not_found":
+        setCodexStatus("not_found");
+        setCodexTitle("Codex window not found");
+        break;
+      case "codex_minimized":
+        setCodexStatus("minimized");
+        setCodexTitle("Codex window minimized");
+        break;
+      case "capture_failed":
+        setCodexStatus("capture_failed");
+        break;
+      default:
+        break;
+    }
+
+    return resolved.message;
+  }
+
   async function refreshConsole() {
     const probe = await probeLocalAgent(defaultLocalAgentBaseUrl);
     const canControl = probe.reachable && !!probe.agentStatus;
     const permissions = canControl ? defaultPermissionsForClient("desktop") : [];
+    setTokenState(probe.tokenState);
 
     remoteSession.connectSession({
       sessionId: "desktop-live-console",
@@ -219,7 +257,7 @@ export function ConsoleRoute() {
     if (!canControl) {
       remoteSession.setCaptureState(idleCaptureState);
       remoteSession.setError(probe.message);
-      setCodexStatus("not_found");
+      setCodexStatus(probe.reachable ? "unpaired" : "not_found");
       setCodexTitle(probe.reachable ? "Pairing required" : "Local Agent offline");
       setViewportMessage(probe.message);
       return;
@@ -237,10 +275,9 @@ export function ConsoleRoute() {
       remoteSession.markActive();
       setViewportMessage("Local desktop control session is ready.");
     } catch (error) {
-      remoteSession.setError(
-        error instanceof Error ? error.message : "Failed to refresh Codex console state."
-      );
-      setViewportMessage("Unable to fetch Codex window or capture state.");
+      const message = applyConsoleError(error, "Unable to fetch Codex window or capture state.");
+      remoteSession.setError(message);
+      setViewportMessage(message);
     }
   }
 
@@ -316,7 +353,7 @@ export function ConsoleRoute() {
       );
       await refreshConsole();
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Action failed.");
+      setFeedback(applyConsoleError(error, "Action failed."));
     } finally {
       setToolbarBusy(false);
     }
@@ -350,10 +387,10 @@ export function ConsoleRoute() {
       if (historyId) {
         markSendFailure(
           historyId,
-          error instanceof Error ? error.message : "Failed to send prompt."
+          resolveErrorMessage(error, "Failed to send prompt.")
         );
       }
-      setFeedback(error instanceof Error ? error.message : "Failed to send prompt.");
+      setFeedback(resolveErrorMessage(error, "Failed to send prompt."));
     }
   }
 
@@ -365,7 +402,14 @@ export function ConsoleRoute() {
         return response;
       }
 
-      const response = await startRecordingCapture(defaultLocalAgentBaseUrl);
+      const confirmed = typeof window === "undefined"
+        ? true
+        : window.confirm("Start screen recording for current remote session?");
+      if (!confirmed) {
+        throw new Error("Recording start canceled.");
+      }
+
+      const response = await startRecordingCapture(defaultLocalAgentBaseUrl, true);
       setRecordingActive(true);
       return response;
     });
@@ -408,7 +452,7 @@ export function ConsoleRoute() {
       setSelectedDiffPath(preferredPath);
       await loadDiffFile(response.projectId, preferredPath);
     } catch (error) {
-      setDiffError(error instanceof Error ? error.message : "Failed to load changed files.");
+      setDiffError(resolveErrorMessage(error, "Failed to load changed files."));
     } finally {
       setDiffLoading(false);
     }
@@ -421,8 +465,11 @@ export function ConsoleRoute() {
       const response = await requestDiffFile(projectId, path, defaultLocalAgentBaseUrl);
       setSelectedDiffPath(response.path);
       setSelectedDiff(response);
+      if (response.truncated) {
+        setFeedback(`Diff too large. Showing first ${response.lineLimit} lines for ${response.path}.`);
+      }
     } catch (error) {
-      setDiffError(error instanceof Error ? error.message : "Failed to load file diff.");
+      setDiffError(resolveErrorMessage(error, "Failed to load file diff."));
     } finally {
       setDiffFileLoading(false);
     }
@@ -482,7 +529,7 @@ export function ConsoleRoute() {
       setLogsTotal(response.total);
       setLogsHasMore(response.hasMore);
     } catch (error) {
-      setLogsError(error instanceof Error ? error.message : "Failed to load logs.");
+      setLogsError(resolveErrorMessage(error, "Failed to load logs."));
     } finally {
       setLogsLoading(false);
     }
@@ -511,7 +558,7 @@ export function ConsoleRoute() {
       setSettingsHighRiskKeys([]);
       setSettingsNotice("");
     } catch (error) {
-      setSettingsError(error instanceof Error ? error.message : "Failed to load settings.");
+      setSettingsError(resolveErrorMessage(error, "Failed to load settings."));
     } finally {
       setSettingsLoading(false);
     }
@@ -541,7 +588,7 @@ export function ConsoleRoute() {
         setFilesPermissionDenied(true);
       }
 
-      setFilesError(error instanceof Error ? error.message : "Failed to load project files.");
+      setFilesError(resolveErrorMessage(error, "Failed to load project files."));
       setProjectFiles([]);
     } finally {
       setFilesLoading(false);
@@ -567,7 +614,7 @@ export function ConsoleRoute() {
         setTasksPermissionDenied(true);
       }
 
-      setTasksError(error instanceof Error ? error.message : "Failed to load task status.");
+      setTasksError(resolveErrorMessage(error, "Failed to load task status."));
       setTaskState(null);
       setTaskPromptActions([]);
       setTaskTestRequest(null);
@@ -594,7 +641,7 @@ export function ConsoleRoute() {
         setNotificationsPermissionDenied(true);
       }
 
-      setNotificationsError(error instanceof Error ? error.message : "Failed to load notifications.");
+      setNotificationsError(resolveErrorMessage(error, "Failed to load notifications."));
       setNotifications([]);
       setNotificationsUnread(0);
     } finally {
@@ -612,7 +659,7 @@ export function ConsoleRoute() {
       await markNotificationRead(notificationId, defaultLocalAgentBaseUrl);
       await loadNotifications();
     } catch (error) {
-      setNotificationsError(error instanceof Error ? error.message : "Failed to mark notification as read.");
+      setNotificationsError(resolveErrorMessage(error, "Failed to mark notification as read."));
     }
   }
 
@@ -621,7 +668,7 @@ export function ConsoleRoute() {
       await clearNotifications(defaultLocalAgentBaseUrl);
       await loadNotifications();
     } catch (error) {
-      setNotificationsError(error instanceof Error ? error.message : "Failed to clear notifications.");
+      setNotificationsError(resolveErrorMessage(error, "Failed to clear notifications."));
     }
   }
 
@@ -673,7 +720,7 @@ export function ConsoleRoute() {
         setSettingsHighRiskKeys(resolveHighRiskPatchKeys(sourceAgent, agentSettingsDraft));
       }
 
-      setSettingsError(error instanceof Error ? error.message : "Failed to save settings.");
+      setSettingsError(resolveErrorMessage(error, "Failed to save settings."));
     } finally {
       setSettingsSaving(false);
     }
@@ -690,7 +737,7 @@ export function ConsoleRoute() {
       await navigator.clipboard.writeText(payload);
       setFeedback(`Copied ${logs.length} visible log row(s).`);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to copy logs.");
+      setFeedback(resolveErrorMessage(error, "Failed to copy logs."));
     }
   }
 
@@ -724,7 +771,7 @@ export function ConsoleRoute() {
       URL.revokeObjectURL(url);
       setFeedback(`Exported ${allRows.length} log row(s).`);
     } catch (error) {
-      setLogsError(error instanceof Error ? error.message : "Failed to export logs.");
+      setLogsError(resolveErrorMessage(error, "Failed to export logs."));
     } finally {
       setLogsExporting(false);
     }
@@ -739,7 +786,7 @@ export function ConsoleRoute() {
       await navigator.clipboard.writeText(selectedDiff.diffText);
       setFeedback(`Copied diff for ${selectedDiff.path}.`);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to copy diff.");
+      setFeedback(resolveErrorMessage(error, "Failed to copy diff."));
     }
   }
 
@@ -780,7 +827,7 @@ export function ConsoleRoute() {
       );
       setFeedback("Output copied to clipboard.");
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to copy output.");
+      setFeedback(resolveErrorMessage(error, "Failed to copy output."));
     }
   }
 
@@ -791,7 +838,7 @@ export function ConsoleRoute() {
       setFeedback("Prompt pasted from clipboard.");
       setViewportMenu(null);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to paste prompt.");
+      setFeedback(resolveErrorMessage(error, "Failed to paste prompt."));
     }
   }
 
@@ -818,7 +865,7 @@ export function ConsoleRoute() {
       setFeedback("Stream reconnected.");
       setViewportMenu(null);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to reconnect stream.");
+      setFeedback(resolveErrorMessage(error, "Failed to reconnect stream."));
     } finally {
       setToolbarBusy(false);
     }
@@ -1152,6 +1199,9 @@ export function ConsoleRoute() {
             codexStatus={codexStatus}
             captureState={remoteSession.captureState}
             latencyMs={remoteSession.latencyMs}
+            frameRate={remoteSession.captureState.frameRate ?? null}
+            tokenState={toViewportTokenState(tokenState)}
+            recordingActive={recordingActive}
             lastError={remoteSession.lastError}
             disabled={!connected}
             onFocusWindow={() =>
@@ -1242,6 +1292,14 @@ export function ConsoleRoute() {
                 ? `${remoteSession.latencyMs} ms`
                 : "-"}
             </div>
+            <div>
+              Frame rate:{" "}
+              {typeof remoteSession.captureState.frameRate === "number"
+                ? `${remoteSession.captureState.frameRate} fps`
+                : "-"}
+            </div>
+            <div>Token verified: {tokenState === "valid" ? "yes" : "no"}</div>
+            <div>Recording: {recordingActive ? "active" : "idle"}</div>
             <div>Capture: {remoteSession.captureState.active ? "active" : "idle"}</div>
           </div>
 
@@ -1285,8 +1343,23 @@ export function ConsoleRoute() {
           padding: "0 16px"
         }}
       >
+        <span>connection: {connected ? "connected" : "offline"}</span>
         <span>console: {remoteSession.status}</span>
         <span>codex: {codexStatus}</span>
+        <span>
+          latency:{" "}
+          {typeof remoteSession.latencyMs === "number"
+            ? `${remoteSession.latencyMs} ms`
+            : "-"}
+        </span>
+        <span>
+          fps:{" "}
+          {typeof remoteSession.captureState.frameRate === "number"
+            ? remoteSession.captureState.frameRate
+            : "-"}
+        </span>
+        <span>token: {tokenState === "valid" ? "verified" : tokenState}</span>
+        <span>recording: {recordingActive ? "active" : "idle"}</span>
         <span>
           capture: {remoteSession.captureState.active ? remoteSession.captureState.mode : "idle"}
         </span>
@@ -2698,6 +2771,10 @@ function resolveHighRiskPatchKeys(source: AgentSettingsState, next: AgentSetting
     keys.push("allowClearLogs");
   }
   return keys;
+}
+
+function toViewportTokenState(tokenState: "missing" | "valid" | "invalid" | "expired"): "verified" | "missing" | "invalid" | "expired" {
+  return tokenState === "valid" ? "verified" : tokenState;
 }
 
 function readClientSettingsSnapshot(

@@ -9,7 +9,16 @@ public sealed record CaptureState(
     string Mode,
     string? WindowId,
     int Width,
-    int Height
+    int Height,
+    int FrameRate = 30,
+    string Quality = "balanced"
+);
+
+public sealed record CapturePerformanceSignal(
+    double CpuUsagePercent,
+    double NetworkJitterMs,
+    bool HasActiveViewer,
+    DateTimeOffset? ObservedAt = null
 );
 
 public interface ICaptureLifecycleService
@@ -20,6 +29,10 @@ public interface ICaptureLifecycleService
         CancellationToken cancellationToken = default);
 
     Task<CaptureState> StopAsync(CancellationToken cancellationToken = default);
+
+    Task<CaptureState> ApplyPerformanceSignalAsync(
+        CapturePerformanceSignal signal,
+        CancellationToken cancellationToken = default);
 
     CaptureState CurrentState { get; }
 }

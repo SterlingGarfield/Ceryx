@@ -65,7 +65,9 @@ function createFetchMock() {
         mode: "balanced",
         windowId: "w001",
         width: 1440,
-        height: 900
+        height: 900,
+        frameRate: 30,
+        quality: "balanced"
       });
     }
 
@@ -203,6 +205,7 @@ function createFetchMock() {
 
 async function renderConsole(fetchMock: ReturnType<typeof vi.fn>) {
   writeDeviceToken("http://127.0.0.1:41527", "ipad_token");
+  vi.spyOn(window, "confirm").mockReturnValue(true);
   useConnectionStore.getState().setCurrentDevice({
     deviceId: "device:http://127.0.0.1:41527",
     deviceName: "Windows Agent",
@@ -481,5 +484,59 @@ describe("ipad console gestures prompt image", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy Visible" }));
     await waitFor(() => expect(writeText).toHaveBeenCalled());
+  });
+
+  it("shows protocol hint and status-bar metrics when input is blocked", async () => {
+    const fetchMock = createFetchMock();
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/input/mouse")) {
+        return mockJson(
+          {
+            ok: false,
+            error: {
+              code: "E_INPUT_BLOCKED",
+              message: "Another device currently controls input.",
+              hint: "Wait until active controller releases the lock.",
+              traceId: "trace_input_lock_001"
+            }
+          },
+          409
+        );
+      }
+
+      if (!baseImpl) {
+        return mockJson({ ok: true });
+      }
+
+      return baseImpl(input, init);
+    });
+
+    await renderConsole(fetchMock);
+
+    const openPanelButton = screen.queryByRole("button", { name: "Open Side Panel" });
+    if (openPanelButton) {
+      fireEvent.click(openPanelButton);
+      await waitFor(() => expect(screen.getByTestId("ipad-side-drawer")).toBeInTheDocument());
+    }
+
+    const surface = screen.getByTestId("ipad-gesture-surface");
+    fireEvent.touchStart(surface, {
+      touches: [{ clientX: 120, clientY: 160 }]
+    });
+    fireEvent.touchEnd(surface, {
+      touches: [],
+      changedTouches: [{ clientX: 120, clientY: 160 }]
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Hint: Wait until active controller releases the lock\./)
+      ).toBeInTheDocument()
+    );
+    expect(screen.getAllByText("token: verified").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("recording: idle").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("fps: 30").length).toBeGreaterThan(0);
   });
 });

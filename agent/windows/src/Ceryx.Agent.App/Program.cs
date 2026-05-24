@@ -22,6 +22,8 @@ using Ceryx.Agent.Storage.Sqlite;
 using Serilog;
 using Serilog.Events;
 
+const int AgentHttpPort = 41527;
+
 var localPaths = LocalPaths.CreateDefault();
 localPaths.EnsureDirectories();
 
@@ -39,10 +41,12 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+    var bindingUrls = AgentNetworkBindingResolver.ResolveUrls(AgentHttpPort);
     builder.Host.UseSerilog();
-    builder.WebHost.UseUrls("http://127.0.0.1:41527");
+    builder.WebHost.UseUrls(bindingUrls.ToArray());
     builder.Services.AddSingleton(localPaths);
     builder.Services.AddSingleton<AgentRuntimeState>();
+    builder.Services.AddSingleton<IPairingRateLimiter, InMemoryPairingRateLimiter>();
     builder.Services.AddSingleton<AgentDiscoveryMetadataFactory>();
     builder.Services.AddSingleton<IAgentDiscoveryPublisher, MdnsAgentDiscoveryPublisher>();
     builder.Services.AddHostedService<AgentDiscoveryHostedService>();

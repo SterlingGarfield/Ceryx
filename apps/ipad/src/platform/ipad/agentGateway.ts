@@ -1,5 +1,6 @@
 import {
   AgentClient,
+  isTokenInvalidError,
   type AgentSettingsPatch,
   type AgentStatus,
   type CaptureStateResponse,
@@ -40,6 +41,7 @@ export interface AgentProbeResult {
   deviceName: string;
   codexStatus: string;
   runtimeStatus: string;
+  tokenState: "missing" | "valid" | "invalid" | "expired";
   message: string;
 }
 
@@ -54,6 +56,7 @@ function createClient(baseUrl: string): AgentClient {
 
 export async function probeAgent(baseUrl: string): Promise<AgentProbeResult> {
   const start = Date.now();
+  const token = readDeviceToken(baseUrl);
   const client = createClient(baseUrl);
 
   try {
@@ -63,8 +66,23 @@ export async function probeAgent(baseUrl: string): Promise<AgentProbeResult> {
     let agentStatus: AgentStatus | null = null;
     try {
       agentStatus = await client.agentStatus();
-    } catch {
-      agentStatus = null;
+    } catch (error) {
+      if (isTokenInvalidError(error)) {
+        clearDeviceToken(baseUrl);
+      }
+
+      return {
+        baseUrl,
+        reachable: true,
+        latencyMs,
+        deviceName: "Windows Agent",
+        codexStatus: "unknown",
+        runtimeStatus: "unpaired",
+        tokenState: token ? (isTokenInvalidError(error) ? "invalid" : "expired") : "missing",
+        message: token
+          ? "Agent reachable, but stored iPad token is invalid."
+          : "Agent reachable. Pair this iPad to continue."
+      };
     }
 
     return {
@@ -74,6 +92,7 @@ export async function probeAgent(baseUrl: string): Promise<AgentProbeResult> {
       deviceName: agentStatus?.deviceName ?? "Windows Agent",
       codexStatus: agentStatus?.codexStatus ?? "unknown",
       runtimeStatus: agentStatus?.status ?? "unpaired",
+      tokenState: "valid",
       message: agentStatus ? "Connected" : "Reachable (pairing required)"
     };
   } catch {
@@ -84,6 +103,7 @@ export async function probeAgent(baseUrl: string): Promise<AgentProbeResult> {
       deviceName: "Windows Agent",
       codexStatus: "unknown",
       runtimeStatus: "offline",
+      tokenState: token ? "expired" : "missing",
       message: "Offline or unreachable"
     };
   }
@@ -222,8 +242,11 @@ export async function takeScreenshot(baseUrl: string): Promise<ScreenshotRespons
   return createClient(baseUrl).screenshot();
 }
 
-export async function startRecordingCapture(baseUrl: string): Promise<RecordingStartResponse> {
-  return createClient(baseUrl).startRecording();
+export async function startRecordingCapture(
+  baseUrl: string,
+  confirmHighRisk = false
+): Promise<RecordingStartResponse> {
+  return createClient(baseUrl).startRecording(confirmHighRisk);
 }
 
 export async function stopRecordingCapture(baseUrl: string): Promise<RecordingStopResponse> {

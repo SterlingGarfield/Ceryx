@@ -116,5 +116,22 @@ public sealed class AuditLogTests : IClassFixture<WebApplicationFactory<Program>
             "E_LOGS_INVALID_REQUEST",
             root.GetProperty("error").GetProperty("code").GetString());
     }
-}
 
+    [Fact]
+    public async Task PerformancePolicy_GetLogsRoute_RejectsInvalidPageBounds()
+    {
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Permission.ViewWindow]);
+
+        var response = await client.GetAsync("/api/v1/logs?page=0&pageSize=500");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(
+            "E_LOGS_INVALID_REQUEST",
+            root.GetProperty("error").GetProperty("code").GetString());
+    }
+}

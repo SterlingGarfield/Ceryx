@@ -11,6 +11,9 @@ export interface RemoteViewportProps {
   codexStatus: string;
   captureState: CaptureStateResponse;
   latencyMs: number | null;
+  frameRate?: number | null;
+  tokenState?: "verified" | "missing" | "invalid" | "expired" | "unknown";
+  recordingActive?: boolean;
   lastError?: string;
   disabled?: boolean;
   onFocusWindow?: () => void;
@@ -27,6 +30,9 @@ export function RemoteViewport({
   codexStatus,
   captureState,
   latencyMs,
+  frameRate = null,
+  tokenState = "unknown",
+  recordingActive = false,
   lastError,
   disabled = false,
   onFocusWindow,
@@ -73,6 +79,15 @@ export function RemoteViewport({
           </StatusChip>
           <StatusChip tone={captureState.active ? "success" : "neutral"}>
             capture: {captureState.active ? captureState.mode : "idle"}
+          </StatusChip>
+          <StatusChip tone={tokenTone(tokenState)}>
+            token: {tokenState}
+          </StatusChip>
+          <StatusChip tone={recordingActive ? "warning" : "neutral"}>
+            recording: {recordingActive ? "active" : "idle"}
+          </StatusChip>
+          <StatusChip tone={captureState.active ? "success" : "neutral"}>
+            fps: {typeof frameRate === "number" ? frameRate : "-"}
           </StatusChip>
         </div>
       </div>
@@ -137,4 +152,18 @@ export function RemoteViewport({
       ) : null}
     </Panel>
   );
+}
+
+function tokenTone(tokenState: RemoteViewportProps["tokenState"]): "success" | "warning" | "error" | "neutral" {
+  switch (tokenState) {
+    case "verified":
+      return "success";
+    case "invalid":
+      return "error";
+    case "expired":
+    case "missing":
+      return "warning";
+    default:
+      return "neutral";
+  }
 }

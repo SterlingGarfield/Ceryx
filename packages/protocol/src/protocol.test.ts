@@ -34,10 +34,11 @@ describe("v0.3 protocol constants", () => {
     ]);
   });
 
-  it("keeps public routes limited to health and pairing request", () => {
+  it("keeps public routes limited to health and pairing endpoints", () => {
     expect(PublicApiRoutes).toEqual([
       "GET /api/v1/health",
-      "POST /api/v1/pairing/request"
+      "POST /api/v1/pairing/request",
+      "POST /api/v1/pairing/desktop-confirm"
     ]);
     expect(ProtectedApiRoutes).toContain("POST /api/v1/prompt/send");
   });

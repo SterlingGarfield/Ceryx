@@ -284,9 +284,10 @@ export async function takeScreenshot(
 }
 
 export async function startRecordingCapture(
-  baseUrl = defaultLocalAgentBaseUrl
+  baseUrl = defaultLocalAgentBaseUrl,
+  confirmHighRisk = false
 ): Promise<RecordingStartResponse> {
-  return getClient(baseUrl).startRecording();
+  return getClient(baseUrl).startRecording(confirmHighRisk);
 }
 
 export async function stopRecordingCapture(

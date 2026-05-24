@@ -15,9 +15,9 @@ using Ceryx.Agent.Storage.Settings;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using System.Net;
 
 namespace Ceryx.Agent.Network;
 
@@ -77,14 +77,15 @@ public static class AgentHttpHostExtensions
             .AllowAnonymousAgent();
         app.MapPost(
             "/api/v1/pairing/request",
-            (PairingRequestBody request, PairingStateMachine pairingStateMachine, ILoggerFactory loggerFactory, HttpContext context) =>
-                PairingRequestHandler(request, pairingStateMachine, loggerFactory, context))
+            (PairingRequestBody request, PairingStateMachine pairingStateMachine, IPairingRateLimiter pairingRateLimiter, ILoggerFactory loggerFactory, HttpContext context) =>
+                PairingRequestHandler(request, pairingStateMachine, pairingRateLimiter, loggerFactory, context))
             .AllowAnonymousAgent();
         app.MapPost(
             "/api/v1/pairing/desktop-confirm",
             (PairingDesktopConfirmBody request, PairingStateMachine pairingStateMachine, ILoggerFactory loggerFactory, HttpContext context) =>
                 PairingDesktopConfirmHandler(request, pairingStateMachine, loggerFactory, context))
-            .AllowAnonymousAgent();
+            .AllowAnonymousAgent()
+            .RequireLocalAgent();
         app.MapPost(
             "/api/v1/pairing/confirm",
             (PairingConfirmBody request, PairingCompletionService pairingCompletionService, ILoggerFactory loggerFactory, HttpContext context) =>
@@ -98,8 +99,8 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth(Permission.ManageDevices);
         app.MapDelete(
             "/api/v1/devices/{deviceId}",
-            (HttpContext context, string deviceId, ITrustedDeviceStore trustedDeviceStore) =>
-                DeleteDeviceHandler(context, deviceId, trustedDeviceStore))
+            (HttpContext context, string deviceId, [FromBody] HighRiskConfirmationBody? body, ITrustedDeviceStore trustedDeviceStore, IAuditLogStore auditLogStore) =>
+                DeleteDeviceHandler(context, deviceId, body, trustedDeviceStore, auditLogStore))
             .RequireAgentAuth(Permission.ManageDevices);
 
         app.MapGet("/api/v1/agent/status", (AgentRuntimeState runtimeState) => AgentStatusHandler(runtimeState))
@@ -186,8 +187,8 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth(Permission.ReadDiff);
         app.MapGet(
             "/api/v1/project/diff/files",
-            (HttpContext context, string? projectId, IProjectConfigRepository projectConfigRepository, IGitDiffService gitDiffService) =>
-                ProjectDiffFilesHandler(context, projectId, projectConfigRepository, gitDiffService))
+            (HttpContext context, string? projectId, int? page, int? pageSize, IProjectConfigRepository projectConfigRepository, IGitDiffService gitDiffService) =>
+                ProjectDiffFilesHandler(context, projectId, page, pageSize, projectConfigRepository, gitDiffService))
             .RequireAgentAuth(Permission.ReadDiff);
         app.MapGet(
             "/api/v1/project/diff/file",
@@ -216,8 +217,8 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth(Permission.Screenshot);
         app.MapPost(
             "/api/v1/media/recording/start",
-            (HttpContext context, IRecordingService recordingService, ICodexWindowLocator locator, IAuditLogStore auditLogStore) =>
-                RecordingStartHandler(context, recordingService, locator, auditLogStore))
+            (HttpContext context, HighRiskConfirmationBody? body, IRecordingService recordingService, ICodexWindowLocator locator, IAuditLogStore auditLogStore) =>
+                RecordingStartHandler(context, body, recordingService, locator, auditLogStore))
             .RequireAgentAuth(Permission.Recording);
         app.MapPost(
             "/api/v1/media/recording/stop",
@@ -227,24 +228,28 @@ public static class AgentHttpHostExtensions
 
         app.MapPost(
             "/api/v1/agent/pause-control",
-            (HttpContext context, AgentRuntimeState runtimeState, ILoggerFactory loggerFactory) =>
-                PauseControlHandler(context, runtimeState, loggerFactory))
-            .RequireAgentAuth(Permission.ManageAgent);
+            (HttpContext context, HighRiskConfirmationBody? body, AgentRuntimeState runtimeState, ILoggerFactory loggerFactory, IAuditLogStore auditLogStore) =>
+                PauseControlHandler(context, body, runtimeState, loggerFactory, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent)
+            .RequireLocalAgent();
         app.MapPost(
             "/api/v1/agent/resume-control",
             (HttpContext context, AgentRuntimeState runtimeState, ILoggerFactory loggerFactory) =>
                 ResumeControlHandler(context, runtimeState, loggerFactory))
-            .RequireAgentAuth(Permission.ManageAgent);
+            .RequireAgentAuth(Permission.ManageAgent)
+            .RequireLocalAgent();
         app.MapPost(
             "/api/v1/agent/open-logs-folder",
             (HttpContext context, IAgentTrayShell trayShell, ILoggerFactory loggerFactory) =>
                 OpenLogsFolderHandler(context, trayShell, loggerFactory))
-            .RequireAgentAuth(Permission.ManageAgent);
+            .RequireAgentAuth(Permission.ManageAgent)
+            .RequireLocalAgent();
         app.MapPost(
             "/api/v1/agent/restart-request",
             (HttpContext context, ILoggerFactory loggerFactory) =>
                 RestartRequestHandler(context, loggerFactory))
-            .RequireAgentAuth(Permission.ManageAgent);
+            .RequireAgentAuth(Permission.ManageAgent)
+            .RequireLocalAgent();
         app.MapGet(
             "/api/v1/logs",
             (HttpContext context, int? page, int? pageSize, string? severity, string? action, string? sessionId, IAuditLogStore auditLogStore) =>
@@ -257,8 +262,8 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth();
         app.MapPatch(
             "/api/v1/settings",
-            (HttpContext context, SettingsPatchBody body, IAgentSettingsStore settingsStore) =>
-                PatchSettingsHandler(context, body, settingsStore))
+            (HttpContext context, SettingsPatchBody body, IAgentSettingsStore settingsStore, IAuditLogStore auditLogStore) =>
+                PatchSettingsHandler(context, body, settingsStore, auditLogStore))
             .RequireAgentAuth(Permission.ManageAgent);
         app.MapGet(
             "/api/v1/notifications",
@@ -316,9 +321,20 @@ public static class AgentHttpHostExtensions
     private static async Task<IResult> PairingRequestHandler(
         PairingRequestBody request,
         PairingStateMachine pairingStateMachine,
+        IPairingRateLimiter pairingRateLimiter,
         ILoggerFactory loggerFactory,
         HttpContext context)
     {
+        if (!TryConsumePairingQuota(context, pairingRateLimiter, out var retryAfter))
+        {
+            context.Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PAIRING_RATE_LIMITED",
+                Message: "Pairing request rate limit exceeded.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: $"Retry after {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds."));
+        }
+
         if (string.IsNullOrWhiteSpace(request.ClientName) ||
             string.IsNullOrWhiteSpace(request.ClientType) ||
             string.IsNullOrWhiteSpace(request.Platform))
@@ -365,11 +381,6 @@ public static class AgentHttpHostExtensions
         HttpContext context)
     {
         var logger = loggerFactory.CreateLogger("Ceryx.Agent.Pairing");
-        var remoteError = EnsureLocalManagementRequest(context, logger);
-        if (remoteError is not null)
-        {
-            return remoteError;
-        }
 
         if (string.IsNullOrWhiteSpace(request.PairingId))
         {
@@ -453,9 +464,41 @@ public static class AgentHttpHostExtensions
     private static async Task<IResult> DeleteDeviceHandler(
         HttpContext context,
         string deviceId,
-        ITrustedDeviceStore trustedDeviceStore)
+        HighRiskConfirmationBody? body,
+        ITrustedDeviceStore trustedDeviceStore,
+        IAuditLogStore auditLogStore)
     {
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PROJECT_INVALID_REQUEST",
+                Message: "deviceId is required.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Provide a valid deviceId."));
+        }
+
+        if (!IsHighRiskConfirmed(body))
+        {
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "device.delete.rejected",
+                $"device={ResolveAuditDeviceId(context)};target={deviceId};result=rejected;reason=confirm_required",
+                severity: "warning");
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_CONFIRM_REQUIRED",
+                Message: "High-risk action requires confirmHighRisk=true.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Send confirmHighRisk=true to delete trusted device."));
+        }
+
         var deleted = await trustedDeviceStore.DeleteAsync(deviceId, context.RequestAborted);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "device.delete.completed",
+            $"device={ResolveAuditDeviceId(context)};target={deviceId};result={(deleted ? "deleted" : "not_found")}",
+            severity: deleted ? "info" : "warning");
         return TypedResults.Ok(new DeviceDeleteResponse(
             Ok: true,
             Deleted: deleted));
@@ -702,9 +745,31 @@ public static class AgentHttpHostExtensions
     private static async Task<IResult> ProjectDiffFilesHandler(
         HttpContext context,
         string? projectId,
+        int? page,
+        int? pageSize,
         IProjectConfigRepository projectConfigRepository,
         IGitDiffService gitDiffService)
     {
+        var requestedPage = page ?? 1;
+        var requestedPageSize = pageSize ?? 100;
+        if (requestedPage <= 0)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PROJECT_INVALID_REQUEST",
+                Message: "page must be >= 1.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry with page >= 1."));
+        }
+
+        if (requestedPageSize <= 0 || requestedPageSize > 500)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PROJECT_INVALID_REQUEST",
+                Message: "pageSize must be between 1 and 500.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry with pageSize in [1, 500]."));
+        }
+
         var projectResult = await ResolveProjectConfigAsync(context, projectId, projectConfigRepository);
         if (!projectResult.IsSuccess || projectResult.Value is null)
         {
@@ -728,12 +793,21 @@ public static class AgentHttpHostExtensions
                 Additions: change.Additions,
                 Deletions: change.Deletions))
             .ToArray();
+        var total = fileEntries.Length;
+        var skip = (requestedPage - 1) * requestedPageSize;
+        var pagedEntries = skip >= total
+            ? Array.Empty<ProjectDiffFileEntryResponse>()
+            : fileEntries.Skip(skip).Take(requestedPageSize).ToArray();
 
         return TypedResults.Ok(new ProjectDiffFilesResponse(
             Ok: true,
             ProjectId: projectResult.Value.Id,
             ProjectName: projectResult.Value.ProjectName,
-            Files: fileEntries));
+            Page: requestedPage,
+            PageSize: requestedPageSize,
+            Total: total,
+            HasMore: skip + pagedEntries.Length < total,
+            Files: pagedEntries));
     }
 
     private static async Task<IResult> ProjectDiffFileHandler(
@@ -1030,14 +1104,36 @@ public static class AgentHttpHostExtensions
 
     private static async Task<IResult> RecordingStartHandler(
         HttpContext context,
+        HighRiskConfirmationBody? body,
         IRecordingService recordingService,
         ICodexWindowLocator locator,
         IAuditLogStore auditLogStore)
     {
+        if (!IsHighRiskConfirmed(body))
+        {
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "media.recording.start.rejected",
+                $"device={ResolveAuditDeviceId(context)};result=rejected;reason=confirm_required",
+                severity: "warning");
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_CONFIRM_REQUIRED",
+                Message: "High-risk action requires confirmHighRisk=true.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Send confirmHighRisk=true to start recording."));
+        }
+
         var window = await locator.GetWindowAsync(context.RequestAborted);
         var result = await recordingService.StartAsync(window, context.RequestAborted);
         if (!result.IsSuccess || result.Value is null)
         {
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "media.recording.start.rejected",
+                $"device={ResolveAuditDeviceId(context)};result=rejected;reason={(result.Error?.Code ?? "unknown")}",
+                severity: "warning");
             return ErrorFromAgentError(context, result.Error ?? new AgentError("E_RECORDING_BUSY", "Failed to start recording.", context.GetOrCreateTraceId()));
         }
 
@@ -1045,7 +1141,7 @@ public static class AgentHttpHostExtensions
             auditLogStore,
             context,
             "media.recording.started",
-            result.Value.StartedAt);
+            $"device={ResolveAuditDeviceId(context)};result=started;startedAt={result.Value.StartedAt}");
         return TypedResults.Ok(result.Value);
     }
 
@@ -1068,20 +1164,37 @@ public static class AgentHttpHostExtensions
         return TypedResults.Ok(result.Value);
     }
 
-    private static IResult PauseControlHandler(
+    private static async Task<IResult> PauseControlHandler(
         HttpContext context,
+        HighRiskConfirmationBody? body,
         AgentRuntimeState runtimeState,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IAuditLogStore auditLogStore)
     {
         var logger = loggerFactory.CreateLogger("Ceryx.Agent.Management");
-        var remoteError = EnsureLocalManagementRequest(context, logger);
-        if (remoteError is not null)
+
+        if (!IsHighRiskConfirmed(body))
         {
-            return remoteError;
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "agent.pause-control.rejected",
+                $"device={ResolveAuditDeviceId(context)};result=rejected;reason=confirm_required",
+                severity: "warning");
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_CONFIRM_REQUIRED",
+                Message: "High-risk action requires confirmHighRisk=true.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Send confirmHighRisk=true to pause current task."));
         }
 
         var status = runtimeState.Pause();
         logger.LogInformation("Applied local management action: pause-control status={Status}", status.ToWireValue());
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "agent.pause-control.applied",
+            $"device={ResolveAuditDeviceId(context)};result=applied");
         return TypedResults.Ok(new AgentManagementResponse(
             Ok: true,
             Action: "pause-control",
@@ -1096,11 +1209,6 @@ public static class AgentHttpHostExtensions
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Ceryx.Agent.Management");
-        var remoteError = EnsureLocalManagementRequest(context, logger);
-        if (remoteError is not null)
-        {
-            return remoteError;
-        }
 
         var status = runtimeState.Resume();
         logger.LogInformation("Applied local management action: resume-control status={Status}", status.ToWireValue());
@@ -1118,11 +1226,6 @@ public static class AgentHttpHostExtensions
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Ceryx.Agent.Management");
-        var remoteError = EnsureLocalManagementRequest(context, logger);
-        if (remoteError is not null)
-        {
-            return remoteError;
-        }
 
         await trayShell.ExecuteAsync(TrayShellCommandIds.OpenLogsFolder, context.RequestAborted);
         logger.LogInformation("Applied local management action: open-logs-folder");
@@ -1139,11 +1242,6 @@ public static class AgentHttpHostExtensions
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Ceryx.Agent.Management");
-        var remoteError = EnsureLocalManagementRequest(context, logger);
-        if (remoteError is not null)
-        {
-            return remoteError;
-        }
 
         logger.LogInformation("Accepted restart request in development mode without execution.");
         return Results.Json(
@@ -1235,7 +1333,8 @@ public static class AgentHttpHostExtensions
     private static async Task<IResult> PatchSettingsHandler(
         HttpContext context,
         SettingsPatchBody body,
-        IAgentSettingsStore settingsStore)
+        IAgentSettingsStore settingsStore,
+        IAuditLogStore auditLogStore)
     {
         if (body.AgentSettings is null)
         {
@@ -1250,6 +1349,12 @@ public static class AgentHttpHostExtensions
         var highRiskChanges = ResolveHighRiskChanges(body.AgentSettings, current);
         if (highRiskChanges.Count > 0 && !body.ConfirmHighRisk)
         {
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "settings.patch.rejected",
+                $"device={ResolveAuditDeviceId(context)};result=rejected;reason=confirm_required;keys={string.Join(",", highRiskChanges)}",
+                severity: "warning");
             return ErrorFromAgentError(context, new AgentError(
                 Code: "E_SETTINGS_CONFIRM_REQUIRED",
                 Message: "High-risk settings require confirmHighRisk=true.",
@@ -1267,6 +1372,11 @@ public static class AgentHttpHostExtensions
         try
         {
             var updated = await settingsStore.UpdateAsync(update, context.RequestAborted);
+            await WriteAuditAsync(
+                auditLogStore,
+                context,
+                "settings.patch.applied",
+                $"device={ResolveAuditDeviceId(context)};result=applied;keys={string.Join(",", highRiskChanges)}");
             return TypedResults.Ok(ToSettingsResponse(updated));
         }
         catch (ArgumentOutOfRangeException ex)
@@ -1317,6 +1427,8 @@ public static class AgentHttpHostExtensions
             "E_LOGS_INVALID_REQUEST" => StatusCodes.Status400BadRequest,
             "E_SETTINGS_INVALID_REQUEST" => StatusCodes.Status400BadRequest,
             "E_SETTINGS_CONFIRM_REQUIRED" => StatusCodes.Status409Conflict,
+            "E_CONFIRM_REQUIRED" => StatusCodes.Status409Conflict,
+            "E_PAIRING_RATE_LIMITED" => StatusCodes.Status429TooManyRequests,
             _ => StatusCodes.Status400BadRequest
         };
 
@@ -1328,31 +1440,6 @@ public static class AgentHttpHostExtensions
                 Hint: error.Hint,
                 TraceId: traceId)),
             statusCode: statusCode);
-    }
-
-    private static IResult? EnsureLocalManagementRequest(HttpContext context, ILogger logger)
-    {
-        if (IsLocalManagementRequest(context))
-        {
-            return null;
-        }
-
-        var traceId = context.GetOrCreateTraceId();
-        logger.LogWarning(
-            "Rejected remote local-management request. method={Method} path={Path} traceId={TraceId}",
-            context.Request.Method,
-            context.Request.Path,
-            traceId);
-
-        var error = new StandardErrorResponse(
-            Ok: false,
-            Error: new StandardErrorBody(
-                Code: "E_PERMISSION_DENIED",
-                Message: "Local management endpoints can only be called from localhost.",
-                Hint: "Use the local desktop client on the same machine.",
-                TraceId: traceId));
-
-        return Results.Json(error, statusCode: StatusCodes.Status403Forbidden);
     }
 
     private static CodexWindowResponse ToCodexWindowResponse(CodexWindowSnapshot snapshot)
@@ -1375,7 +1462,9 @@ public static class AgentHttpHostExtensions
             Mode: state.Mode,
             WindowId: state.WindowId,
             Width: state.Width,
-            Height: state.Height);
+            Height: state.Height,
+            FrameRate: state.FrameRate,
+            Quality: state.Quality);
     }
 
     private static async Task<(bool IsSuccess, InputExecutionContext? Context, IResult? ErrorResult)> PrepareInputContextAsync(
@@ -1502,29 +1591,6 @@ public static class AgentHttpHostExtensions
         return 1200;
     }
 
-    private static bool IsLocalManagementRequest(HttpContext context)
-    {
-        if (context.Request.Headers.TryGetValue("X-Forwarded-For", out var forwardedValues))
-        {
-            var firstForwarded = forwardedValues.ToString()
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(firstForwarded) &&
-                IPAddress.TryParse(firstForwarded, out var forwardedIp))
-            {
-                return IPAddress.IsLoopback(forwardedIp);
-            }
-        }
-
-        var remoteIp = context.Connection.RemoteIpAddress;
-        if (remoteIp is null)
-        {
-            return true;
-        }
-
-        return IPAddress.IsLoopback(remoteIp);
-    }
-
     private static async Task WriteAuditAsync(
         IAuditLogStore auditLogStore,
         HttpContext context,
@@ -1541,6 +1607,11 @@ public static class AgentHttpHostExtensions
     }
 
     private static string ResolveAuditSessionId(HttpContext context)
+    {
+        return context.GetAuthenticatedDevice()?.DeviceId ?? "local";
+    }
+
+    private static string ResolveAuditDeviceId(HttpContext context)
     {
         return context.GetAuthenticatedDevice()?.DeviceId ?? "local";
     }
@@ -1693,5 +1764,35 @@ public static class AgentHttpHostExtensions
         }
 
         return risks;
+    }
+
+    private static bool IsHighRiskConfirmed(HighRiskConfirmationBody? body)
+    {
+        return body?.ConfirmHighRisk is true;
+    }
+
+    private static bool TryConsumePairingQuota(
+        HttpContext context,
+        IPairingRateLimiter pairingRateLimiter,
+        out TimeSpan retryAfter)
+    {
+        var key = ResolvePairingRateLimitKey(context);
+        return pairingRateLimiter.TryAcquire(key, DateTimeOffset.UtcNow, out retryAfter);
+    }
+
+    private static string ResolvePairingRateLimitKey(HttpContext context)
+    {
+        if (context.Request.Headers.TryGetValue("X-Forwarded-For", out var forwardedValues))
+        {
+            var firstForwarded = forwardedValues.ToString()
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(firstForwarded))
+            {
+                return firstForwarded;
+            }
+        }
+
+        return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     }
 }

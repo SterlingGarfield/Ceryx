@@ -9,7 +9,25 @@ namespace Ceryx.Agent.Tests;
 
 internal static class AuthTestHelper
 {
+    internal sealed record AuthorizedClientContext(HttpClient Client, string DeviceId, string Token);
+
     public static async Task<HttpClient> CreateAuthorizedClientAsync(
+        WebApplicationFactory<Program> factory,
+        IReadOnlyList<Permission> permissions,
+        string clientType = "desktop",
+        string platform = "windows",
+        string? tokenOverride = null)
+    {
+        var context = await CreateAuthorizedClientContextAsync(
+            factory,
+            permissions,
+            clientType,
+            platform,
+            tokenOverride);
+        return context.Client;
+    }
+
+    public static async Task<AuthorizedClientContext> CreateAuthorizedClientContextAsync(
         WebApplicationFactory<Program> factory,
         IReadOnlyList<Permission> permissions,
         string clientType = "desktop",
@@ -34,6 +52,6 @@ internal static class AuthTestHelper
 
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return client;
+        return new AuthorizedClientContext(client, deviceId, token);
     }
 }

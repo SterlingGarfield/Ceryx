@@ -35,6 +35,43 @@ public sealed class ProjectWorkspaceApiTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task PerformancePolicy_ProjectDiffFilesEndpoint_ReturnsPaginationMetadata()
+    {
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Permission.ReadDiff]);
+
+        var response = await client.GetAsync("/api/v1/project/diff/files?projectId=workspace-default&page=1&pageSize=1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.True(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(1, root.GetProperty("page").GetInt32());
+        Assert.Equal(1, root.GetProperty("pageSize").GetInt32());
+        Assert.True(root.GetProperty("total").GetInt32() >= 0);
+        _ = root.GetProperty("hasMore").GetBoolean();
+        Assert.True(root.TryGetProperty("files", out var files));
+        Assert.True(files.GetArrayLength() <= 1);
+    }
+
+    [Fact]
+    public async Task PerformancePolicy_ProjectDiffFilesEndpoint_RejectsInvalidPagination()
+    {
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Permission.ReadDiff]);
+
+        var response = await client.GetAsync("/api/v1/project/diff/files?projectId=workspace-default&page=0&pageSize=600");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(
+            "E_PROJECT_INVALID_REQUEST",
+            document.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task ProjectFilesEndpoint_RequiresReadDiffPermission()
     {
         var client = await AuthTestHelper.CreateAuthorizedClientAsync(

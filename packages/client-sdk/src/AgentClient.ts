@@ -188,14 +188,15 @@ export class AgentClient {
     return this.request<TrustedDevice[]>("/api/v1/devices", { auth: true });
   }
 
-  async deleteDevice(deviceId: string): Promise<{ ok: boolean }> {
+  async deleteDevice(deviceId: string, confirmHighRisk = false): Promise<{ ok: boolean }> {
     if (!deviceId) {
       throw new Error("deviceId is required");
     }
 
     return this.request<{ ok: boolean }>(`/api/v1/devices/${encodeURIComponent(deviceId)}`, {
       auth: true,
-      method: "DELETE"
+      method: "DELETE",
+      body: { confirmHighRisk }
     });
   }
 
@@ -239,13 +240,34 @@ export class AgentClient {
     });
   }
 
-  async getProjectDiffFiles(projectId: string): Promise<ProjectDiffFilesResponse> {
+  async getProjectDiffFiles(
+    projectId: string,
+    options: { page?: number; pageSize?: number } = {}
+  ): Promise<ProjectDiffFilesResponse> {
     if (!projectId.trim()) {
       throw new Error("projectId is required");
     }
 
+    if (options.page !== undefined && options.page <= 0) {
+      throw new Error("page must be greater than 0");
+    }
+
+    if (options.pageSize !== undefined && options.pageSize <= 0) {
+      throw new Error("pageSize must be greater than 0");
+    }
+
+    const search = new URLSearchParams();
+    search.set("projectId", projectId);
+    if (options.page !== undefined) {
+      search.set("page", String(options.page));
+    }
+
+    if (options.pageSize !== undefined) {
+      search.set("pageSize", String(options.pageSize));
+    }
+
     return this.request<ProjectDiffFilesResponse>(
-      `/api/v1/project/diff/files?projectId=${encodeURIComponent(projectId)}`,
+      `/api/v1/project/diff/files?${search.toString()}`,
       {
         auth: true
       }
@@ -441,10 +463,11 @@ export class AgentClient {
     });
   }
 
-  async startRecording(): Promise<RecordingStartResponse> {
+  async startRecording(confirmHighRisk = false): Promise<RecordingStartResponse> {
     return this.request<RecordingStartResponse>("/api/v1/media/recording/start", {
       auth: true,
-      method: "POST"
+      method: "POST",
+      body: { confirmHighRisk }
     });
   }
 
@@ -455,10 +478,11 @@ export class AgentClient {
     });
   }
 
-  async pauseControl(): Promise<AgentManagementResponse> {
+  async pauseControl(confirmHighRisk = false): Promise<AgentManagementResponse> {
     return this.request<AgentManagementResponse>("/api/v1/agent/pause-control", {
       auth: true,
-      method: "POST"
+      method: "POST",
+      body: { confirmHighRisk }
     });
   }
 

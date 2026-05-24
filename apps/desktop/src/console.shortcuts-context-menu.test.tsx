@@ -29,8 +29,9 @@ async function waitForActionCycle(fetchMock: ReturnType<typeof vi.fn>, fragment:
 async function renderConsole() {
   window.history.pushState({}, "", "/console");
   writeDeviceToken(defaultLocalAgentBaseUrl, "desktop_token");
+  vi.spyOn(window, "confirm").mockReturnValue(true);
 
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
 
     if (url.endsWith("/api/v1/health")) {
@@ -73,7 +74,9 @@ async function renderConsole() {
         mode: "balanced",
         windowId: null,
         width: 1440,
-        height: 900
+        height: 900,
+        frameRate: 30,
+        quality: "balanced"
       });
     }
 
@@ -392,5 +395,44 @@ describe("desktop console shortcuts and context-menu", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy Visible" }));
     await waitFor(() => expect(writeText).toHaveBeenCalled());
+  });
+
+  it("shows protocol hint and status-bar metrics when recording hits disk-low", async () => {
+    const { fetchMock } = await renderConsole();
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/media/recording/start")) {
+        return mockJson(
+          {
+            ok: false,
+            error: {
+              code: "E_DISK_LOW",
+              message: "Recording stopped because disk space is low.",
+              hint: "Free disk space before starting recording again.",
+              traceId: "trace_disk_low_001"
+            }
+          },
+          507
+        );
+      }
+
+      if (!baseImpl) {
+        return mockJson({ ok: true });
+      }
+
+      return baseImpl(input, init);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Hint: Free disk space before starting recording again\./)
+      ).toBeInTheDocument()
+    );
+    expect(screen.getAllByText("token: verified").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("recording: idle").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("fps: 30").length).toBeGreaterThan(0);
   });
 });

@@ -58,6 +58,33 @@ public sealed class MediaPolicyTests
     }
 
     [Fact]
+    public async Task PerformancePolicy_RecordingStart_AllowsWhenDiskAtOneGbThreshold()
+    {
+        const long oneGb = 1024L * 1024 * 1024;
+        var root = CreateTestRoot("recording-threshold");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var service = new RecordingService(new LocalPaths(root), new FixedDiskSpaceProvider(oneGb));
+            var window = new CodexWindowSnapshot("found", "w1", "Codex", "codex", 1, DateTimeOffset.UtcNow);
+
+            var result = await service.StartAsync(window);
+
+            Assert.True(result.IsSuccess);
+            Assert.NotNull(result.Value);
+            Assert.Equal("recording", result.Value!.Status);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RecordingStart_RejectsDuplicateRequests()
     {
         var root = CreateTestRoot("recording-duplicate");

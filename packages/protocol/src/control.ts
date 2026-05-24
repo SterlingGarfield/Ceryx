@@ -78,6 +78,8 @@ export interface CaptureStateResponse {
   windowId?: string | null;
   width: number;
   height: number;
+  frameRate?: number;
+  quality?: string;
 }
 
 export interface CaptureSignalRequest {
@@ -218,6 +220,10 @@ export interface ProjectDiffFilesResponse {
   ok: boolean;
   projectId: string;
   projectName: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
   files: ProjectDiffFileEntry[];
 }
 

@@ -211,7 +211,9 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
         Assert.EndsWith(".png", screenshotRoot.GetProperty("fileName").GetString(), StringComparison.OrdinalIgnoreCase);
 
         var recordingClient = await CreateClientAsync(Permission.Recording);
-        var start = await recordingClient.PostAsync("/api/v1/media/recording/start", content: null);
+        var start = await recordingClient.PostAsync(
+            "/api/v1/media/recording/start",
+            CreateJsonContent(new { confirmHighRisk = true }));
         Assert.Equal(HttpStatusCode.OK, start.StatusCode);
         var startRoot = await ReadJsonAsync(start);
         Assert.Equal("recording", startRoot.GetProperty("status").GetString());

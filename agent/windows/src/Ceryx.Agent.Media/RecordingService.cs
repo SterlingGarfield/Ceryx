@@ -6,7 +6,7 @@ namespace Ceryx.Agent.Media;
 
 public sealed class RecordingService : IRecordingService
 {
-    private const long MinFreeBytesRequired = 256L * 1024 * 1024;
+    private const long MinFreeBytesRequired = 1024L * 1024 * 1024;
     private static readonly TimeSpan MaxDuration = TimeSpan.FromMinutes(30);
 
     private readonly object _sync = new();

@@ -17,6 +17,10 @@ public sealed record DeviceDeleteResponse(
     [property: JsonPropertyName("deleted")] bool Deleted
 );
 
+public sealed record HighRiskConfirmationBody(
+    [property: JsonPropertyName("confirmHighRisk")] bool ConfirmHighRisk
+);
+
 public sealed record CodexWindowResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("windowId")] string? WindowId,
@@ -92,6 +96,10 @@ public sealed record ProjectDiffFilesResponse(
     [property: JsonPropertyName("ok")] bool Ok,
     [property: JsonPropertyName("projectId")] string ProjectId,
     [property: JsonPropertyName("projectName")] string ProjectName,
+    [property: JsonPropertyName("page")] int Page,
+    [property: JsonPropertyName("pageSize")] int PageSize,
+    [property: JsonPropertyName("total")] int Total,
+    [property: JsonPropertyName("hasMore")] bool HasMore,
     [property: JsonPropertyName("files")] IReadOnlyList<ProjectDiffFileEntryResponse> Files
 );
 
@@ -257,7 +265,9 @@ public sealed record CaptureStateResponse(
     [property: JsonPropertyName("mode")] string Mode,
     [property: JsonPropertyName("windowId")] string? WindowId,
     [property: JsonPropertyName("width")] int Width,
-    [property: JsonPropertyName("height")] int Height
+    [property: JsonPropertyName("height")] int Height,
+    [property: JsonPropertyName("frameRate")] int FrameRate,
+    [property: JsonPropertyName("quality")] string Quality
 );
 
 public sealed record CaptureSignalBody(

@@ -332,6 +332,76 @@ describe("AgentClient", () => {
     expect(calls[0]?.init?.method).toBe("POST");
   });
 
+  it("posts high-risk confirmation when starting recording", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          status: "recording",
+          startedAt: "2026-05-22T07:00:00.000Z"
+        });
+      }
+    });
+
+    const response = await client.startRecording(true);
+
+    expect(response.ok).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/media/recording/start");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ confirmHighRisk: true }));
+  });
+
+  it("posts high-risk confirmation when pausing control", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          action: "pause-control",
+          status: "applied",
+          executed: true,
+          message: "Agent control paused."
+        });
+      }
+    });
+
+    const response = await client.pauseControl(true);
+
+    expect(response.ok).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/agent/pause-control");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ confirmHighRisk: true }));
+  });
+
+  it("posts high-risk confirmation when deleting trusted device", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          deleted: true
+        });
+      }
+    });
+
+    const response = await client.deleteDevice("dev_001", true);
+
+    expect(response.ok).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/devices/dev_001");
+    expect(calls[0]?.init?.method).toBe("DELETE");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ confirmHighRisk: true }));
+  });
+
   it("requests paginated logs with filters", async () => {
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     const client = new AgentClient({
@@ -499,6 +569,10 @@ describe("AgentClient", () => {
           ok: true,
           projectId: "workspace-default",
           projectName: "CeryxProject",
+          page: 1,
+          pageSize: 100,
+          total: 1,
+          hasMore: false,
           files: [{ path: "src/main.ts", status: "modified", additions: 3, deletions: 1 }]
         });
       }
@@ -510,6 +584,37 @@ describe("AgentClient", () => {
     expect(response.files).toHaveLength(1);
     expect(calls[0]?.url).toBe(
       "http://127.0.0.1:41527/api/v1/project/diff/files?projectId=workspace-default"
+    );
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("requests paged project diff files for selected project", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          projectId: "workspace-default",
+          projectName: "CeryxProject",
+          page: 2,
+          pageSize: 50,
+          total: 140,
+          hasMore: true,
+          files: [{ path: "src/main.ts", status: "modified", additions: 3, deletions: 1 }]
+        });
+      }
+    });
+
+    const response = await client.getProjectDiffFiles("workspace-default", { page: 2, pageSize: 50 });
+
+    expect(response.ok).toBe(true);
+    expect(response.page).toBe(2);
+    expect(response.pageSize).toBe(50);
+    expect(calls[0]?.url).toBe(
+      "http://127.0.0.1:41527/api/v1/project/diff/files?projectId=workspace-default&page=2&pageSize=50"
     );
     expect(calls[0]?.init?.method).toBe("GET");
   });
