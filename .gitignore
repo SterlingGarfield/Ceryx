@@ -17,6 +17,7 @@ coverage/
 
 # Native/build artifacts
 target/
+apps/desktop/src-tauri/gen/
 bin/
 obj/
 
