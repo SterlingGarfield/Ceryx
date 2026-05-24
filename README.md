@@ -2,15 +2,18 @@
 
 Ceryx v0.3 is planned as a dual-control product for iPad and Windows Desktop, backed by a local Windows Agent.
 
-## W1 Status
+## Current Status (W8 in progress)
 
-This repository is currently at W1 Day 1 workspace bootstrap:
+Workspace verification lanes are currently passing:
 
-- `apps/ipad` will contain the Capacitor iPad client.
-- `apps/desktop` will contain the Tauri desktop client.
-- `packages/*` will contain shared protocol, SDK, UI, and feature packages.
-- `agent/windows` will contain the Windows Agent solution.
-- `docs/superpowers/plans` contains the implementation plans.
+- `npm run typecheck`
+- `npm run test`
+- `npm run build`
+- `dotnet test agent/windows/Ceryx.Agent.Windows.sln`
+
+W8 packaging blocker:
+
+- Desktop Tauri packaging is blocked by missing `apps/desktop/src-tauri/Cargo.toml`.
 
 ## Scripts
 
@@ -23,6 +26,13 @@ pnpm dev:ipad
 pnpm dev:desktop
 pnpm dev:agent
 pnpm test:agent
+powershell -ExecutionPolicy Bypass -File .\scripts\build-all.ps1 -SkipDesktopTauri
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-agent-api.ps1 -Token "<token>"
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-local-desktop.ps1 -Token "<token>"
 ```
 
-`dotnet` is required before Agent work begins. It is not required for W1 Day 1.
+## Plan and Release Docs
+
+- Master/W1-W8 plans: `docs/superpowers/plans`
+- Release docs: `docs/release`
+- Operator docs: `docs/operator`
