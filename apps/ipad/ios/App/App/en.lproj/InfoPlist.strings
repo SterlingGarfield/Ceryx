@@ -1,0 +1,7 @@
+"NSLocalNetworkUsageDescription" = "Ceryx iPad uses your local network to discover and connect to your Windows Agent.";
+"NSMicrophoneUsageDescription" = "Ceryx iPad uses the microphone for voice input while controlling Codex.";
+"NSPhotoLibraryUsageDescription" = "Ceryx iPad reads photos so you can upload reference images to Codex.";
+"NSPhotoLibraryAddUsageDescription" = "Ceryx iPad saves screenshots and generated images to your photo library.";
+"NSCameraUsageDescription" = "Ceryx iPad uses the camera when you capture photos to send to Codex.";
+"NSSpeechRecognitionUsageDescription" = "Ceryx iPad uses speech recognition to convert voice prompts to text.";
+"NSUserNotificationsUsageDescription" = "Ceryx iPad uses notifications to alert you about agent status and high-risk actions.";

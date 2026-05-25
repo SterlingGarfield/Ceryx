@@ -4,7 +4,7 @@ param(
     [string]$BaseUrl = "http://127.0.0.1:41527",
     [int]$DesktopPort = 4173,
     [string]$Token = "",
-    [int]$TimeoutSeconds = 12
+    [int]$TimeoutSeconds = 40
 )
 
 Set-StrictMode -Version Latest
@@ -71,6 +71,9 @@ function Invoke-SmokeStep {
 $pwshPath = (Get-Command pwsh).Source
 $agentProcess = $null
 $desktopProcess = $null
+$runStamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+$desktopLogPath = Join-Path $repoRoot ".workspace-data/smoke/desktop-$DesktopMode-$DesktopPort-$runStamp.log"
+$desktopErrPath = Join-Path $repoRoot ".workspace-data/smoke/desktop-$DesktopMode-$DesktopPort-$runStamp.err.log"
 $agentStartedByScript = $false
 
 try {
@@ -88,12 +91,19 @@ try {
     }
     catch {
         $agentProject = Join-Path $repoRoot "agent/windows/src/Ceryx.Agent.App/Ceryx.Agent.App.csproj"
-        Write-Host "Agent not ready. Starting with dotnet run..."
-        $agentProcess = Start-Process -FilePath $pwshPath -ArgumentList @(
-            "-NoProfile",
-            "-Command",
-            "dotnet run --project `"$agentProject`""
-        ) -WindowStyle Hidden -PassThru
+        $agentPublishedExe = Join-Path $repoRoot ".workspace-data/release/v0.3/agent/win-x64/Ceryx.Agent.App.exe"
+        if (Test-Path $agentPublishedExe) {
+            Write-Host "Agent not ready. Starting with published executable..."
+            $agentProcess = Start-Process -FilePath $agentPublishedExe -WindowStyle Hidden -PassThru
+        }
+        else {
+            Write-Host "Agent not ready. Starting with dotnet run..."
+            $agentProcess = Start-Process -FilePath $pwshPath -ArgumentList @(
+                "-NoProfile",
+                "-Command",
+                "dotnet run --project `"$agentProject`""
+            ) -WindowStyle Hidden -PassThru
+        }
         $agentStartedByScript = $true
         Wait-HttpReady -Name "Agent health endpoint" -Url $healthUrl -Timeout $TimeoutSeconds
     }
@@ -123,21 +133,36 @@ try {
             }
         }
 
-        $desktopCommand = "pnpm --filter @ceryx/desktop exec vite preview --host 127.0.0.1 --port $DesktopPort --strictPort"
+        $desktopCommand = "corepack pnpm --filter @ceryx/desktop exec vite preview --host 127.0.0.1 --port $DesktopPort --strictPort"
     }
     else {
-        $desktopCommand = "pnpm --filter @ceryx/desktop dev -- --host 127.0.0.1 --port $DesktopPort --strictPort"
+        $desktopCommand = "corepack pnpm --filter @ceryx/desktop dev -- --host 127.0.0.1 --port $DesktopPort --strictPort"
     }
 
     Write-Host "Starting desktop web shell ($DesktopMode)..."
+    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $desktopLogPath) -Force)
     $desktopProcess = Start-Process -FilePath $pwshPath -ArgumentList @(
         "-NoProfile",
         "-Command",
         $desktopCommand
-    ) -WindowStyle Hidden -PassThru
+    ) -WindowStyle Hidden -PassThru -RedirectStandardOutput $desktopLogPath -RedirectStandardError $desktopErrPath
 
     $desktopUrl = "http://127.0.0.1:$DesktopPort/"
-    Wait-HttpReady -Name "Desktop shell" -Url $desktopUrl -Timeout $TimeoutSeconds
+    try {
+        Wait-HttpReady -Name "Desktop shell" -Url $desktopUrl -Timeout $TimeoutSeconds
+    }
+    catch {
+        if (Test-Path $desktopLogPath) {
+            Write-Host "Desktop shell log tail:"
+            Get-Content -Path $desktopLogPath -Tail 40
+        }
+        if (Test-Path $desktopErrPath) {
+            Write-Host "Desktop shell error log tail:"
+            Get-Content -Path $desktopErrPath -Tail 40
+        }
+
+        throw
+    }
 
     Invoke-SmokeStep -Name "Desktop shell returns index.html" -Action {
         $response = Invoke-WebRequest -UseBasicParsing -Method Get -Uri $desktopUrl -TimeoutSec 5

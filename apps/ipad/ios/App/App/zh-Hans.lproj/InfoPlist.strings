@@ -1,0 +1,7 @@
+"NSLocalNetworkUsageDescription" = "Ceryx iPad 需要使用本地网络来发现并连接你的 Windows Agent。";
+"NSMicrophoneUsageDescription" = "Ceryx iPad 需要使用麦克风，以便在远程控制 Codex 时进行语音输入。";
+"NSPhotoLibraryUsageDescription" = "Ceryx iPad 需要读取相册，用于向 Codex 上传参考图片。";
+"NSPhotoLibraryAddUsageDescription" = "Ceryx iPad 需要写入相册，用于保存截图和生成图片。";
+"NSCameraUsageDescription" = "Ceryx iPad 需要使用相机，以便拍摄并发送图片到 Codex。";
+"NSSpeechRecognitionUsageDescription" = "Ceryx iPad 需要使用语音识别，将语音提示词转换为文本。";
+"NSUserNotificationsUsageDescription" = "Ceryx iPad 需要发送通知，用于提醒 Agent 状态变化和高风险操作。";

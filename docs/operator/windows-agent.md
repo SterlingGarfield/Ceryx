@@ -9,12 +9,16 @@ pnpm dev:agent
 ## Build and publish Agent (release artifact)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-all.ps1 -SkipDesktopTauri
+powershell -ExecutionPolicy Bypass -File .\scripts\build-all.ps1
 ```
 
 Published artifact output:
 
 - `.workspace-data/release/v0.3/agent/win-x64`
+- `.workspace-data/release/v0.3/windows-package/win-x64`
+  - `agent\`
+  - `desktop-tauri\ceryx-desktop.exe`
+  - `config\agent-defaults.env`
 
 ## Stop Agent
 

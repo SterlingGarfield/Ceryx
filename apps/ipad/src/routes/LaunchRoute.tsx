@@ -1,9 +1,36 @@
 import { ceryxColors } from "@ceryx/design-tokens";
 import { Button, Panel } from "@ceryx/ui";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  requestLocalNotificationsPermission,
+  type LocalNotificationPermissionState
+} from "../platform/ipad/localNotificationsPermission";
 
 export function LaunchRoute() {
   const navigate = useNavigate();
+  const [notificationPermission, setNotificationPermission] =
+    useState<LocalNotificationPermissionState>("prompt");
+  const [permissionBusy, setPermissionBusy] = useState(false);
+
+  async function handleRequestNotificationsPermission() {
+    setPermissionBusy(true);
+    try {
+      const result = await requestLocalNotificationsPermission();
+      setNotificationPermission(result);
+    } finally {
+      setPermissionBusy(false);
+    }
+  }
+
+  const permissionLabel =
+    notificationPermission === "granted"
+      ? "granted"
+      : notificationPermission === "denied"
+        ? "denied"
+        : notificationPermission === "unsupported"
+          ? "unsupported"
+          : "not requested";
 
   return (
     <section style={{ margin: "0 auto", maxWidth: 960, padding: 24 }}>
@@ -25,6 +52,9 @@ export function LaunchRoute() {
         <p style={{ margin: 0 }}>
           Step 2: Open Connections to discover devices and start pairing.
         </p>
+        <p style={{ margin: 0 }}>
+          Step 3: Grant local notifications permission for status alerts.
+        </p>
         <div style={{ display: "flex", gap: 12 }}>
           <Button
             size="ipad"
@@ -41,6 +71,22 @@ export function LaunchRoute() {
           >
             Open Live Console
           </Button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Button
+            size="ipad"
+            variant="secondary"
+            style={{ minWidth: 240 }}
+            disabled={permissionBusy}
+            onClick={() => void handleRequestNotificationsPermission()}
+          >
+            {permissionBusy
+              ? "Requesting Notification Permission..."
+              : "Request Notification Permission"}
+          </Button>
+          <span style={{ color: ceryxColors.onSurfaceVariant }}>
+            Notification permission: {permissionLabel}
+          </span>
         </div>
       </Panel>
     </section>

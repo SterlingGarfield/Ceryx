@@ -13,6 +13,8 @@
     "test": "vitest run --environment jsdom"
   },
   "dependencies": {
+    "@capacitor/core": "^8.3.4",
+    "@capacitor/local-notifications": "^8.2.0",
     "@ceryx/client-sdk": "workspace:^",
     "@ceryx/design-tokens": "workspace:*",
     "@ceryx/feature-remote-control": "workspace:^",
@@ -23,6 +25,8 @@
     "react-router-dom": "^6.28.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/ios": "^8.3.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^18.3.18",
