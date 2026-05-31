@@ -5,6 +5,8 @@ import {
   type AgentManagementResponse,
   type AgentStatus,
   type CaptureFrameResult,
+  type CaptureSignalRequest,
+  type CaptureSignalResponse,
   type CaptureMode,
   type CaptureStateResponse,
   type CodexWindowSnapshot,
@@ -181,6 +183,13 @@ export async function stopCapture(
   baseUrl = defaultLocalAgentBaseUrl
 ): Promise<CaptureStateResponse> {
   return getClient(baseUrl).stopCapture();
+}
+
+export async function sendCaptureSignal(
+  request: CaptureSignalRequest,
+  baseUrl = defaultLocalAgentBaseUrl
+): Promise<CaptureSignalResponse> {
+  return getClient(baseUrl).sendCaptureSignal(request);
 }
 
 export async function sendPrompt(

@@ -104,7 +104,9 @@ public static class AgentHttpHostExtensions
                 DeleteDeviceHandler(context, deviceId, body, trustedDeviceStore, auditLogStore))
             .RequireAgentAuth(Permission.ManageDevices);
 
-        app.MapGet("/api/v1/agent/status", (AgentRuntimeState runtimeState) => AgentStatusHandler(runtimeState))
+        app.MapGet(
+            "/api/v1/agent/status",
+            (AgentRuntimeState runtimeState, IWindowCaptureBackendInfo backendInfo) => AgentStatusHandler(runtimeState, backendInfo))
             .RequireAgentAuth();
         app.MapGet("/api/v1/agent/paths", () => AgentPathsHandler(localPaths))
             .RequireAgentAuth();
@@ -298,7 +300,9 @@ public static class AgentHttpHostExtensions
             Version: ServiceVersion));
     }
 
-    private static Ok<AgentStatusResponse> AgentStatusHandler(AgentRuntimeState runtimeState)
+    private static Ok<AgentStatusResponse> AgentStatusHandler(
+        AgentRuntimeState runtimeState,
+        IWindowCaptureBackendInfo backendInfo)
     {
         var status = runtimeState.GetStatus();
 
@@ -310,7 +314,8 @@ public static class AgentHttpHostExtensions
             HttpPort: DefaultHttpPort,
             SupportsWebRTC: true,
             SupportsDesktopClient: true,
-            CodexStatus: CodexWindowStatus.NotFound.ToWireValue()));
+            CodexStatus: CodexWindowStatus.NotFound.ToWireValue(),
+            CaptureBackend: backendInfo.ActiveBackend));
     }
 
     private static Ok<AgentPathsResponse> AgentPathsHandler(LocalPaths localPaths)
@@ -1796,7 +1801,8 @@ public static class AgentHttpHostExtensions
                 KeyboardShortcuts: true,
                 NotificationsEnabled: true,
                 LogsAutoRefresh: true,
-                PreviewRefreshProfile: "balanced"));
+                PreviewRefreshProfile: "balanced",
+                ViewportTransport: "webrtc"));
     }
 
     private static IReadOnlyList<string> ResolveHighRiskChanges(

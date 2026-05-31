@@ -74,7 +74,11 @@ try
     builder.Services.AddSingleton<ICaptureLifecycleService, InMemoryCaptureLifecycleService>();
     builder.Services.AddSingleton<ICaptureSignalService, NoOpCaptureSignalService>();
     builder.Services.AddSingleton<IDiskSpaceProvider, DriveDiskSpaceProvider>();
-    builder.Services.AddSingleton<IWindowImageCapture, WindowImageCapture>();
+    builder.Services.AddSingleton<WindowImageCapture>();
+    builder.Services.AddSingleton<IWindowImageCapture>(serviceProvider =>
+        serviceProvider.GetRequiredService<WindowImageCapture>());
+    builder.Services.AddSingleton<IWindowCaptureBackendInfo>(serviceProvider =>
+        serviceProvider.GetRequiredService<WindowImageCapture>());
     builder.Services.AddSingleton<IFramePreviewService, FramePreviewService>();
     builder.Services.AddSingleton<IUploadImageService, UploadImageService>();
     builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();

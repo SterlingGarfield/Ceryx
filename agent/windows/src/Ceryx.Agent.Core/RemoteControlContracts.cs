@@ -231,7 +231,8 @@ public sealed record ClientSettingsStateResponse(
     [property: JsonPropertyName("keyboardShortcuts")] bool KeyboardShortcuts,
     [property: JsonPropertyName("notificationsEnabled")] bool NotificationsEnabled,
     [property: JsonPropertyName("logsAutoRefresh")] bool LogsAutoRefresh,
-    [property: JsonPropertyName("previewRefreshProfile")] string PreviewRefreshProfile
+    [property: JsonPropertyName("previewRefreshProfile")] string PreviewRefreshProfile,
+    [property: JsonPropertyName("viewportTransport")] string ViewportTransport
 );
 
 public sealed record SettingsResponse(
@@ -274,12 +275,24 @@ public sealed record CaptureStateResponse(
 public sealed record CaptureSignalBody(
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("payload")] string Payload
+    [property: JsonPropertyName("payload")] string? Payload,
+    [property: JsonPropertyName("sdp")] string? Sdp,
+    [property: JsonPropertyName("candidate")] CaptureIceCandidateBody? Candidate
 );
 
 public sealed record CaptureSignalResponse(
     [property: JsonPropertyName("ok")] bool Ok,
-    [property: JsonPropertyName("status")] string Status
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("sessionId")] string? SessionId = null,
+    [property: JsonPropertyName("type")] string? Type = null,
+    [property: JsonPropertyName("sdp")] string? Sdp = null,
+    [property: JsonPropertyName("candidate")] CaptureIceCandidateBody? Candidate = null
+);
+
+public sealed record CaptureIceCandidateBody(
+    [property: JsonPropertyName("candidate")] string Candidate,
+    [property: JsonPropertyName("sdpMid")] string? SdpMid,
+    [property: JsonPropertyName("sdpMLineIndex")] int? SdpMLineIndex
 );
 
 public sealed record UploadImageResponse(

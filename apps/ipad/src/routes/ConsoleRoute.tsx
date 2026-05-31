@@ -30,7 +30,8 @@ import {
   useConnectionStore,
   usePromptStore,
   useRemoteSessionStore,
-  useViewportPreview
+  useViewportPreview,
+  useWebRtcViewport
 } from "@ceryx/feature-remote-control";
 import { Button, Panel, StatusChip, TextArea } from "@ceryx/ui";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -53,6 +54,7 @@ import {
   sendHotkeyInput,
   sendMouseInput,
   patchAgentSettings,
+  sendCaptureSignal,
   sendPrompt,
   sendScrollInput,
   startCapture,
@@ -83,6 +85,7 @@ const defaultLogsPageSize = 80;
 const ipadLogRowHeight = 64;
 const ipadClientSettingsStorageKey = "ceryx.ipad.client-settings.v1";
 const defaultPreviewRefreshProfile: PreviewRefreshProfile = "balanced";
+const defaultViewportTransport = "webrtc";
 const balancedPreviewPollMs = 1000;
 const highFrequencyPreviewPollMs = 400;
 
@@ -215,6 +218,8 @@ export function ConsoleRoute() {
   const [notificationsPermissionDenied, setNotificationsPermissionDenied] = useState(false);
   const [notifications, setNotifications] = useState<AgentNotificationEntry[]>([]);
   const [notificationsUnread, setNotificationsUnread] = useState(0);
+  const [forcePollingFallback, setForcePollingFallback] = useState(false);
+  const webRtcVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const activeBaseUrl = normalizeAgentBaseUrl(currentDevice?.baseUrl) ?? fallbackBaseUrl;
   const deviceName = currentDevice?.deviceName ?? "Windows Agent";
@@ -356,8 +361,27 @@ export function ConsoleRoute() {
   const previewCaptureMode: CaptureMode = previewRefreshProfile === "high_frequency"
     ? "low_latency"
     : "balanced";
+  const viewportTransport =
+    clientSettingsDraft?.viewportTransport === "polling" ||
+    clientSettingsSource?.viewportTransport === "polling"
+      ? "polling"
+      : defaultViewportTransport;
+  const webRtcViewport = useWebRtcViewport({
+    enabled: connected && remoteSession.captureState.active && viewportTransport === "webrtc" && !forcePollingFallback,
+    sessionKey: `${sessionDeviceId}:webrtc:${activeBaseUrl}`,
+    transport: viewportTransport,
+    sendSignal: (request) => sendCaptureSignal(activeBaseUrl, request),
+    onFallback: (message) => {
+      setForcePollingFallback(true);
+      setViewportMessage(`WebRTC degraded: ${message}`);
+    }
+  });
+  const pollingPreviewEnabled =
+    connected &&
+    remoteSession.captureState.active &&
+    (viewportTransport === "polling" || forcePollingFallback || webRtcViewport.phase === "degraded");
   const viewportPreview = useViewportPreview({
-    enabled: connected && remoteSession.captureState.active,
+    enabled: pollingPreviewEnabled,
     pollIntervalMs: previewPollIntervalMs,
     sessionKey: `${sessionDeviceId}:${activeBaseUrl}`,
     fetchFrame: () => getCaptureFrame(activeBaseUrl),
@@ -377,6 +401,34 @@ export function ConsoleRoute() {
     previewError: viewportPreview.lastError,
     statusMessage: viewportMessage
   });
+
+  useEffect(() => {
+    if (!remoteSession.captureState.active) {
+      setForcePollingFallback(false);
+    }
+  }, [remoteSession.captureState.active]);
+
+  useEffect(() => {
+    if (viewportTransport === "polling") {
+      setForcePollingFallback(false);
+    }
+  }, [viewportTransport]);
+
+  useEffect(() => {
+    const video = webRtcVideoRef.current;
+    if (!video) {
+      return;
+    }
+
+    video.srcObject = webRtcViewport.stream;
+    if (webRtcViewport.stream) {
+      void video.play().catch(() => undefined);
+    }
+
+    return () => {
+      video.srcObject = null;
+    };
+  }, [webRtcViewport.stream]);
 
   const canControlInput = connected && hasPermission(remoteSession.permissions, "control_input");
   const canUploadImage = connected && hasPermission(remoteSession.permissions, "upload_image");
@@ -1350,9 +1402,26 @@ export function ConsoleRoute() {
                 }}
               />
             ) : null}
+            {webRtcViewport.stream ? (
+              <video
+                ref={webRtcVideoRef}
+                autoPlay
+                muted
+                playsInline
+                data-testid="ipad-viewport-video"
+                style={{
+                  display: "block",
+                  height: "100%",
+                  inset: 0,
+                  objectFit: "contain",
+                  position: "absolute",
+                  width: "100%"
+                }}
+              />
+            ) : null}
             <div
               style={{
-                background: viewportPreview.frameUrl
+                background: (webRtcViewport.stream || viewportPreview.frameUrl)
                   ? "linear-gradient(180deg, rgba(20,18,16,0.34), rgba(20,18,16,0.52))"
                   : "linear-gradient(180deg, rgba(20,18,16,0.96), rgba(46,39,34,0.98))",
                 display: "grid",
@@ -1368,7 +1437,7 @@ export function ConsoleRoute() {
               <div style={{ color: "#d0c7bf", fontSize: 13 }}>
                 session={remoteSession.sessionId || "n/a"} | capture=
                 {remoteSession.captureState.active ? remoteSession.captureState.mode : "idle"} | frame=
-                {viewportPreview.capturedAt || "none"}
+                {webRtcViewport.stream ? "webrtc" : (viewportPreview.capturedAt || "none")}
               </div>
             </div>
           </div>
@@ -1763,6 +1832,28 @@ export function ConsoleRoute() {
                           >
                             <option value="balanced">balanced (1000 ms)</option>
                             <option value="high_frequency">high_frequency (400 ms)</option>
+                          </select>
+                        </label>
+                        <label style={{ display: "grid", gap: 4 }}>
+                          <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+                            Viewport transport
+                          </span>
+                          <select
+                            value={clientSettingsDraft.viewportTransport ?? defaultViewportTransport}
+                            onChange={(event) =>
+                              setClientSettingsDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      viewportTransport: event.target.value === "polling" ? "polling" : "webrtc"
+                                    }
+                                  : current
+                              )
+                            }
+                            style={ipadFieldStyle}
+                          >
+                            <option value="webrtc">webrtc (default)</option>
+                            <option value="polling">polling fallback only</option>
                           </select>
                         </label>
                         <label style={{ display: "grid", gap: 4 }}>
@@ -2764,7 +2855,9 @@ function equalClientSettings(a: ClientSettingsState, b: ClientSettingsState): bo
     a.notificationsEnabled === b.notificationsEnabled &&
     a.logsAutoRefresh === b.logsAutoRefresh &&
     normalizePreviewRefreshProfile(a.previewRefreshProfile) ===
-      normalizePreviewRefreshProfile(b.previewRefreshProfile)
+      normalizePreviewRefreshProfile(b.previewRefreshProfile) &&
+    (a.viewportTransport ?? defaultViewportTransport) ===
+      (b.viewportTransport ?? defaultViewportTransport)
   );
 }
 
@@ -2870,7 +2963,9 @@ function readClientSettingsSnapshot(
       logsAutoRefresh: parsed.logsAutoRefresh ?? fallback.logsAutoRefresh,
       previewRefreshProfile: normalizePreviewRefreshProfile(
         parsed.previewRefreshProfile ?? fallback.previewRefreshProfile ?? defaultPreviewRefreshProfile
-      )
+      ),
+      viewportTransport:
+        parsed.viewportTransport === "polling" ? "polling" : (fallback.viewportTransport ?? defaultViewportTransport)
     };
   } catch {
     return fallback;

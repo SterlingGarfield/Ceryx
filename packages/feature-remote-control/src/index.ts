@@ -4,6 +4,7 @@ export * from "./CodexToolbar";
 export * from "./PromptComposer";
 export * from "./RemoteViewport";
 export * from "./useViewportPreview";
+export * from "./useWebRtcViewport";
 export * from "./defaultPermissions";
 export * from "./protocolError";
 export * from "./stores/useConnectionStore";

@@ -74,6 +74,34 @@ Preview frame policy:
   - the Codex window is minimized (`E_CODEX_MINIMIZED`)
 - Preview frames are **not persisted** to `Screenshots/`.
 
+WebRTC signaling policy:
+
+- `POST /api/v1/capture/webrtc/signal` is token-authenticated and session-scoped.
+- Request body supports:
+  - `sessionId`
+  - `type`: `offer | answer | ice-candidate | negotiation-needed | performance | viewer.heartbeat | viewer.idle | viewer.inactive`
+  - `sdp` (for offer/answer)
+  - `candidate` (`candidate`, `sdpMid`, `sdpMLineIndex`)
+  - `payload` (for performance envelope passthrough)
+- Response body returns normalized status plus optional negotiated fields:
+  - `ok`
+  - `status`
+  - `sessionId`
+  - `type`
+  - `sdp`
+  - `candidate`
+- Session lifecycle:
+  - in-memory session store keyed by `sessionId`
+  - inactive sessions are evicted after 60 seconds
+  - disconnected/degraded clients should retry with a fresh `offer`
+
+Capture backend selection:
+
+- Capture backend can be requested with env `CERYX_CAPTURE_BACKEND=auto|wgc|gdi`.
+- Runtime status exposure:
+  - `GET /api/v1/agent/status` now includes `captureBackend`.
+  - `auto` prefers WGC on supported Windows runtime and falls back to GDI when unavailable.
+
 ## Media
 
 - `POST /api/v1/assets/upload-image` (`upload_image`)

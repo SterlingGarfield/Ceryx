@@ -16,7 +16,8 @@ public sealed record AgentStatusResponse(
     [property: JsonPropertyName("httpPort")] int HttpPort,
     [property: JsonPropertyName("supportsWebRTC")] bool SupportsWebRTC,
     [property: JsonPropertyName("supportsDesktopClient")] bool SupportsDesktopClient,
-    [property: JsonPropertyName("codexStatus")] string CodexStatus
+    [property: JsonPropertyName("codexStatus")] string CodexStatus,
+    [property: JsonPropertyName("captureBackend")] string CaptureBackend
 );
 
 public sealed record AgentPathsResponse(

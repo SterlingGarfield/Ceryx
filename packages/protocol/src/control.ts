@@ -10,6 +10,8 @@ export type CaptureMode = (typeof CaptureModes)[number];
 
 export const PreviewRefreshProfiles = ["balanced", "high_frequency"] as const;
 export type PreviewRefreshProfile = (typeof PreviewRefreshProfiles)[number];
+export const ViewportTransports = ["webrtc", "polling"] as const;
+export type ViewportTransport = (typeof ViewportTransports)[number];
 
 export interface CodexWindowSnapshot {
   status: CodexWindowStatus | string;
@@ -88,12 +90,24 @@ export interface CaptureStateResponse {
 export interface CaptureSignalRequest {
   sessionId: string;
   type: string;
-  payload: string;
+  payload?: string;
+  sdp?: string;
+  candidate?: CaptureIceCandidate;
 }
 
 export interface CaptureSignalResponse {
   ok: boolean;
   status: string;
+  sessionId?: string;
+  type?: string;
+  sdp?: string;
+  candidate?: CaptureIceCandidate;
+}
+
+export interface CaptureIceCandidate {
+  candidate: string;
+  sdpMid?: string;
+  sdpMLineIndex?: number;
 }
 
 export interface UploadImageResponse {
@@ -184,6 +198,7 @@ export interface ClientSettingsState {
   notificationsEnabled: boolean;
   logsAutoRefresh: boolean;
   previewRefreshProfile: PreviewRefreshProfile | string;
+  viewportTransport?: ViewportTransport | string;
 }
 
 export interface SettingsResponse {

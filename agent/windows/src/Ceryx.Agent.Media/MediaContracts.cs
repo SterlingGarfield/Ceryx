@@ -53,6 +53,13 @@ public sealed record CapturedWindowFrame(
     DateTimeOffset CapturedAt
 );
 
+public interface IWindowCaptureBackendInfo
+{
+    string ActiveBackend { get; }
+
+    string RequestedBackend { get; }
+}
+
 public interface IWindowImageCapture
 {
     Task<Result<CapturedWindowFrame>> CaptureAsync(

@@ -35,6 +35,7 @@ export interface AgentStatus {
   supportsWebRTC: boolean;
   supportsDesktopClient: boolean;
   codexStatus: CodexWindowStatus;
+  captureBackend?: "auto" | "wgc" | "gdi" | string;
 }
 
 export interface DiscoveredAgent {

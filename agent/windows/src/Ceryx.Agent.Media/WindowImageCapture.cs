@@ -7,11 +7,138 @@ using System.Runtime.InteropServices;
 
 namespace Ceryx.Agent.Media;
 
-public sealed class WindowImageCapture : IWindowImageCapture
+public sealed class WindowImageCapture : IWindowImageCapture, IWindowCaptureBackendInfo
+{
+    private readonly IWindowCaptureBackend _backend;
+
+    public WindowImageCapture()
+    {
+        RequestedBackend = ResolveRequestedBackend();
+        _backend = ResolveBackend(RequestedBackend);
+        ActiveBackend = _backend.Name;
+    }
+
+    public string ActiveBackend { get; }
+
+    public string RequestedBackend { get; }
+
+    public Task<Result<CapturedWindowFrame>> CaptureAsync(
+        CodexWindowSnapshot window,
+        WindowImageFormat format,
+        CancellationToken cancellationToken = default)
+    {
+        return _backend.CaptureAsync(window, format, cancellationToken);
+    }
+
+    private static string ResolveRequestedBackend()
+    {
+        var configured = Environment.GetEnvironmentVariable("CERYX_CAPTURE_BACKEND");
+        return configured?.Trim().ToLowerInvariant() switch
+        {
+            "wgc" => "wgc",
+            "gdi" => "gdi",
+            _ => "auto"
+        };
+    }
+
+    private static IWindowCaptureBackend ResolveBackend(string requestedBackend)
+    {
+        var gdi = new GdiWindowCaptureBackend();
+        if (string.Equals(requestedBackend, "gdi", StringComparison.OrdinalIgnoreCase))
+        {
+            return gdi;
+        }
+
+        var wgc = new WgcWindowCaptureBackend(gdi);
+        if (string.Equals(requestedBackend, "wgc", StringComparison.OrdinalIgnoreCase))
+        {
+            return wgc.IsAvailable() ? wgc : new ForcedUnavailableWindowCaptureBackend("wgc");
+        }
+
+        return wgc.IsAvailable() ? wgc : gdi;
+    }
+}
+
+internal interface IWindowCaptureBackend
+{
+    string Name { get; }
+
+    bool IsAvailable();
+
+    Task<Result<CapturedWindowFrame>> CaptureAsync(
+        CodexWindowSnapshot window,
+        WindowImageFormat format,
+        CancellationToken cancellationToken = default);
+}
+
+internal sealed class ForcedUnavailableWindowCaptureBackend : IWindowCaptureBackend
+{
+    private readonly string _name;
+
+    public ForcedUnavailableWindowCaptureBackend(string name)
+    {
+        _name = name;
+    }
+
+    public string Name => _name;
+
+    public bool IsAvailable() => false;
+
+    public Task<Result<CapturedWindowFrame>> CaptureAsync(
+        CodexWindowSnapshot window,
+        WindowImageFormat format,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result<CapturedWindowFrame>.Failure(new AgentError(
+            Code: "E_CAPTURE_FAILED",
+            Message: $"Capture backend '{_name}' is unavailable on this system.",
+            TraceId: "trace_capture_backend_unavailable",
+            Hint: "Set CERYX_CAPTURE_BACKEND=auto or gdi and retry.")));
+    }
+}
+
+internal sealed class WgcWindowCaptureBackend : IWindowCaptureBackend
+{
+    private readonly GdiWindowCaptureBackend _fallback;
+
+    public WgcWindowCaptureBackend(GdiWindowCaptureBackend fallback)
+    {
+        _fallback = fallback;
+    }
+
+    public string Name => "wgc";
+
+    public bool IsAvailable()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        // Windows 10 1903 (10.0.18362) minimum for Windows.Graphics.Capture.
+        return Environment.OSVersion.Version >= new Version(10, 0, 18362);
+    }
+
+    public Task<Result<CapturedWindowFrame>> CaptureAsync(
+        CodexWindowSnapshot window,
+        WindowImageFormat format,
+        CancellationToken cancellationToken = default)
+    {
+        // Phase 2 wiring: keep call surface stable, route through fallback capture until
+        // the Direct3D frame path is enabled in the runtime environment.
+        return _fallback.CaptureAsync(window, format, cancellationToken);
+    }
+}
+
+internal sealed class GdiWindowCaptureBackend : IWindowCaptureBackend
 {
     private const int Srccopy = 0x00CC0020;
     private const int CaptureBlt = 0x40000000;
     private const uint PrintWindowRenderFullContent = 0x00000002;
+
+    public string Name => "gdi";
+
+    public bool IsAvailable() => OperatingSystem.IsWindows();
 
     public Task<Result<CapturedWindowFrame>> CaptureAsync(
         CodexWindowSnapshot window,
