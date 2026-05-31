@@ -3,6 +3,8 @@ import {
   isTokenInvalidError,
   type AgentSettingsPatch,
   type AgentStatus,
+  type CaptureFrameResult,
+  type CaptureMode,
   type CaptureStateResponse,
   type CodexWindowSnapshot,
   type InputActionResponse,
@@ -17,6 +19,7 @@ import {
   type ProjectTasksResponse,
   type PairingConfirmResponse,
   type PairingConfirmRejectedResponse,
+  type PairingDesktopConfirmResponse,
   type PairingRequestResponse,
   type ProjectDiffResponse,
   type PromptSendResponse,
@@ -95,7 +98,8 @@ export async function probeAgent(baseUrl: string): Promise<AgentProbeResult> {
       tokenState: "valid",
       message: agentStatus ? "Connected" : "Reachable (pairing required)"
     };
-  } catch {
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error ?? "");
     return {
       baseUrl,
       reachable: false,
@@ -104,7 +108,7 @@ export async function probeAgent(baseUrl: string): Promise<AgentProbeResult> {
       codexStatus: "unknown",
       runtimeStatus: "offline",
       tokenState: token ? "expired" : "missing",
-      message: "Offline or unreachable"
+      message: errorMessage ? `Offline or unreachable: ${errorMessage}` : "Offline or unreachable"
     };
   }
 }
@@ -135,6 +139,13 @@ export async function confirmPairing(
   return createClient(baseUrl).confirmPairing(request);
 }
 
+export async function desktopConfirmPairing(
+  baseUrl: string,
+  request: { pairingId: string }
+): Promise<PairingDesktopConfirmResponse> {
+  return createClient(baseUrl).desktopConfirmPairing(request);
+}
+
 export async function getCodexWindow(baseUrl: string): Promise<CodexWindowSnapshot> {
   return createClient(baseUrl).getCodexWindow();
 }
@@ -147,9 +158,16 @@ export async function getCaptureState(baseUrl: string): Promise<CaptureStateResp
   return createClient(baseUrl).getCaptureState();
 }
 
-export async function startCapture(baseUrl: string): Promise<CaptureStateResponse> {
+export async function getCaptureFrame(baseUrl: string): Promise<CaptureFrameResult> {
+  return createClient(baseUrl).getCaptureFrame();
+}
+
+export async function startCapture(
+  baseUrl: string,
+  mode: CaptureMode = "balanced"
+): Promise<CaptureStateResponse> {
   return createClient(baseUrl).startCapture({
-    mode: "balanced",
+    mode,
     target: "codex_window"
   });
 }

@@ -55,6 +55,10 @@ const messageByCode: Record<string, ErrorMessagePreset> = {
     state: "capture_failed",
     message: "Capture failed. Refresh Codex window and retry."
   },
+  E_CAPTURE_INACTIVE: {
+    state: "capture_failed",
+    message: "Capture is inactive. Start capture and retry."
+  },
   E_INPUT_BLOCKED: {
     state: "input_blocked",
     message: "Input is blocked by another active controller."

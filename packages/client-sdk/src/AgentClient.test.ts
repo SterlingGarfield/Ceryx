@@ -46,6 +46,26 @@ describe("AgentClient", () => {
     expect(storedToken).toBe("dt_001");
   });
 
+  it("surfaces non-json pairing failures as api errors", async () => {
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      fetchImpl: async () =>
+        new Response(null, {
+          status: 500
+        })
+    });
+
+    await expect(
+      client.confirmPairing({
+        pairingId: "pair_001",
+        code: "123456"
+      })
+    ).rejects.toMatchObject({
+      code: "E_HTTP_500",
+      status: 500
+    });
+  });
+
   it("clears token and raises callback on E_TOKEN_INVALID", async () => {
     let clearCalled = false;
     let callbackError: CeryxApiError | undefined;
@@ -152,6 +172,38 @@ describe("AgentClient", () => {
     expect(calls[0]?.headers).not.toMatchObject({
       Authorization: expect.any(String)
     });
+  });
+
+  it("binds global fetch when no custom fetch implementation is provided", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ context: unknown; url: string; init: RequestInit | undefined }> = [];
+
+    globalThis.fetch = (async function (
+      this: typeof globalThis,
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) {
+      calls.push({
+        context: this,
+        url: String(input),
+        init
+      });
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+
+    try {
+      const client = new AgentClient({
+        baseUrl: "http://127.0.0.1:41527"
+      });
+
+      await client.health();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.context).toBe(globalThis);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/health");
   });
 
   it("calls codex window endpoint with authenticated GET", async () => {
@@ -468,7 +520,8 @@ describe("AgentClient", () => {
             showLatency: true,
             keyboardShortcuts: true,
             notificationsEnabled: true,
-            logsAutoRefresh: true
+            logsAutoRefresh: true,
+            previewRefreshProfile: "balanced"
           }
         });
       }
@@ -505,7 +558,8 @@ describe("AgentClient", () => {
             showLatency: true,
             keyboardShortcuts: true,
             notificationsEnabled: true,
-            logsAutoRefresh: true
+            logsAutoRefresh: true,
+            previewRefreshProfile: "balanced"
           }
         });
       }
@@ -533,6 +587,41 @@ describe("AgentClient", () => {
         confirmHighRisk: true
       })
     );
+  });
+
+  it("gets capture frame payload with metadata headers", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const frameBlob = new Blob(["jpeg"], { type: "image/jpeg" });
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return new Response(frameBlob, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/jpeg",
+            "X-Ceryx-Frame-Captured-At": "2026-05-27T01:00:00.000Z",
+            "X-Ceryx-Frame-Width": "1280",
+            "X-Ceryx-Frame-Height": "720"
+          }
+        });
+      }
+    });
+
+    const frame = await client.getCaptureFrame();
+
+    expect(frame.contentType).toBe("image/jpeg");
+    expect(frame.capturedAt).toBe("2026-05-27T01:00:00.000Z");
+    expect(frame.width).toBe(1280);
+    expect(frame.height).toBe(720);
+    expect(frame.blob.type).toBe("image/jpeg");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/capture/frame");
+    expect(calls[0]?.init?.method).toBe("GET");
+    expect(calls[0]?.init?.headers).toMatchObject({
+      Accept: "image/jpeg",
+      Authorization: "Bearer token_123"
+    });
   });
 
   it("requests project diff from diff endpoint", async () => {

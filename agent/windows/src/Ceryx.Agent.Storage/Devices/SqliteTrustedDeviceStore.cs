@@ -7,6 +7,8 @@ namespace Ceryx.Agent.Storage.Devices;
 
 public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
 {
+    private const int AddRetryDelayMilliseconds = 120;
+    private const int AddMaxAttempts = 2;
     private readonly SqliteConnectionFactory _connectionFactory;
 
     public SqliteTrustedDeviceStore(SqliteConnectionFactory connectionFactory)
@@ -18,36 +20,47 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
     {
         ArgumentNullException.ThrowIfNull(device);
 
-        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
-        var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO paired_devices (
-                id,
-                name,
-                platform,
-                client_type,
-                token_hash,
-                permissions_json,
-                created_at
-            )
-            VALUES (
-                $id,
-                $name,
-                $platform,
-                $clientType,
-                $tokenHash,
-                $permissionsJson,
-                $createdAt
-            );
-            """;
-        command.Parameters.AddWithValue("$id", device.DeviceId);
-        command.Parameters.AddWithValue("$name", device.Name);
-        command.Parameters.AddWithValue("$platform", device.Platform);
-        command.Parameters.AddWithValue("$clientType", device.ClientType);
-        command.Parameters.AddWithValue("$tokenHash", device.TokenHash);
-        command.Parameters.AddWithValue("$permissionsJson", SerializePermissions(device.Permissions));
-        command.Parameters.AddWithValue("$createdAt", device.CreatedAt.ToString("O"));
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        for (var attempt = 1; attempt <= AddMaxAttempts; attempt += 1)
+        {
+            try
+            {
+                await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+                var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO paired_devices (
+                        id,
+                        name,
+                        platform,
+                        client_type,
+                        token_hash,
+                        permissions_json,
+                        created_at
+                    )
+                    VALUES (
+                        $id,
+                        $name,
+                        $platform,
+                        $clientType,
+                        $tokenHash,
+                        $permissionsJson,
+                        $createdAt
+                    );
+                    """;
+                command.Parameters.AddWithValue("$id", device.DeviceId);
+                command.Parameters.AddWithValue("$name", device.Name);
+                command.Parameters.AddWithValue("$platform", device.Platform);
+                command.Parameters.AddWithValue("$clientType", device.ClientType);
+                command.Parameters.AddWithValue("$tokenHash", device.TokenHash);
+                command.Parameters.AddWithValue("$permissionsJson", SerializePermissions(device.Permissions));
+                command.Parameters.AddWithValue("$createdAt", device.CreatedAt.ToString("O"));
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                return;
+            }
+            catch (SqliteException ex) when (attempt < AddMaxAttempts && IsRetriableWriteError(ex))
+            {
+                await Task.Delay(AddRetryDelayMilliseconds, cancellationToken);
+            }
+        }
     }
 
     public async Task<IReadOnlyList<TrustedDeviceRecord>> ListAsync(CancellationToken cancellationToken = default)
@@ -182,5 +195,10 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
             "copy_output" or
             "manage_agent" or
             "manage_devices";
+    }
+
+    private static bool IsRetriableWriteError(SqliteException exception)
+    {
+        return exception.SqliteErrorCode is 5 or 10;
     }
 }

@@ -35,6 +35,7 @@ import type {
   NotificationClearResponse,
   NotificationReadResponse,
   NotificationsResponse,
+  PreviewRefreshProfile,
   RecordingStartResponse,
   RecordingStopResponse,
   ScreenshotResponse,
@@ -98,6 +99,14 @@ export interface UploadImageFile {
   content: Blob;
 }
 
+export interface CaptureFrameResult {
+  blob: Blob;
+  contentType: string;
+  capturedAt: string;
+  width: number;
+  height: number;
+}
+
 export class CeryxApiError extends Error {
   constructor(
     public readonly code: string,
@@ -120,7 +129,7 @@ export class AgentClient {
   private readonly waitImpl: (delayMs: number) => Promise<void>;
 
   constructor(private readonly options: AgentClientOptions) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? resolveDefaultFetchImpl();
     this.waitImpl = options.waitImpl ?? wait;
   }
 
@@ -433,6 +442,39 @@ export class AgentClient {
     });
   }
 
+  async getCaptureFrame(): Promise<CaptureFrameResult> {
+    const headers: Record<string, string> = {
+      Accept: "image/jpeg"
+    };
+
+    const token = this.options.getToken?.();
+    if (!token) {
+      throw new Error("Missing device token for authenticated request: /api/v1/capture/frame");
+    }
+    headers.Authorization = `Bearer ${token}`;
+
+    const response = await this.fetchImpl(
+      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/capture/frame`,
+      {
+        headers,
+        method: "GET"
+      }
+    );
+
+    if (!response.ok) {
+      const payload = await readJsonPayload(response);
+      throw this.toApiError(response.status, payload);
+    }
+
+    return {
+      blob: await response.blob(),
+      contentType: response.headers.get("Content-Type") ?? "image/jpeg",
+      capturedAt: response.headers.get("X-Ceryx-Frame-Captured-At") ?? "",
+      width: parseHeaderNumber(response.headers.get("X-Ceryx-Frame-Width")),
+      height: parseHeaderNumber(response.headers.get("X-Ceryx-Frame-Height"))
+    };
+  }
+
   async sendCaptureSignal(request: CaptureSignalRequest): Promise<CaptureSignalResponse> {
     return this.request<CaptureSignalResponse>("/api/v1/capture/webrtc/signal", {
       auth: true,
@@ -614,14 +656,30 @@ export class AgentClient {
       method: config.method ?? "GET"
     });
 
-    const payload = await response.json();
+    const payload = await readJsonPayload(response);
 
     if (!response.ok && config.allowNon2xx) {
+      if (payload === null) {
+        throw new CeryxApiError(
+          `E_HTTP_${response.status}`,
+          response.status,
+          `HTTP request failed with status ${response.status}.`
+        );
+      }
+
       return payload as T;
     }
 
     if (!response.ok) {
       throw this.toApiError(response.status, payload);
+    }
+
+    if (payload === null) {
+      throw new CeryxApiError(
+        "E_HTTP_EMPTY_BODY",
+        response.status,
+        `HTTP ${response.status} returned an empty JSON body.`
+      );
     }
 
     return payload as T;
@@ -653,8 +711,28 @@ export class AgentClient {
   }
 }
 
+export function normalizePreviewRefreshProfile(
+  value: PreviewRefreshProfile | string | null | undefined
+): PreviewRefreshProfile {
+  return value === "high_frequency" ? "high_frequency" : "balanced";
+}
+
 function stripTrailingSlash(input: string): string {
   return input.endsWith("/") ? input.slice(0, -1) : input;
+}
+
+function parseHeaderNumber(value: string | null): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function resolveDefaultFetchImpl(): typeof fetch {
+  const fetchImpl = globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    throw new Error("Global fetch is unavailable.");
+  }
+
+  return fetchImpl.bind(globalThis);
 }
 
 function isBodyInitPayload(value: unknown): value is BodyInit {
@@ -705,4 +783,17 @@ function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
+}
+
+async function readJsonPayload(response: Response): Promise<unknown> {
+  const raw = await response.text();
+  if (!raw.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
 }

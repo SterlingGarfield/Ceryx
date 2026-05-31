@@ -56,7 +56,8 @@ public sealed record PairingDesktopConfirmBody(
 
 public sealed record PairingDesktopConfirmResponse(
     [property: JsonPropertyName("ok")] bool Ok,
-    [property: JsonPropertyName("state")] string State
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("code")] string? Code = null
 );
 
 public sealed record PairingConfirmBody(

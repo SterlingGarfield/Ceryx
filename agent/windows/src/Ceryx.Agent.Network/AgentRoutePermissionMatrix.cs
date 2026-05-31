@@ -34,6 +34,7 @@ public static class AgentRoutePermissionMatrix
         new("POST", "/api/v1/capture/start", false, Permission.ViewWindow),
         new("POST", "/api/v1/capture/stop", false, Permission.ViewWindow),
         new("GET", "/api/v1/capture/state", false, Permission.ViewWindow),
+        new("GET", "/api/v1/capture/frame", false, Permission.ViewWindow),
         new("POST", "/api/v1/capture/webrtc/signal", false, Permission.ViewWindow),
         new("POST", "/api/v1/assets/upload-image", false, Permission.UploadImage),
         new("GET", "/api/v1/project/diff", false, Permission.ReadDiff),

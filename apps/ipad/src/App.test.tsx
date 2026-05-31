@@ -128,6 +128,56 @@ describe("iPad routes", () => {
     }
   });
 
+  it("requests desktop approval and pre-fills the six-digit code on pair route", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/pairing/request")) {
+        return mockJson({
+          ok: true,
+          pairingId: "pair_001",
+          expiresAt: "2026-05-27T01:59:00.000Z",
+          state: "waiting_desktop_confirm"
+        });
+      }
+
+      if (url.endsWith("/api/v1/pairing/desktop-confirm")) {
+        return mockJson({
+          ok: true,
+          state: "code_input",
+          code: "654321"
+        });
+      }
+
+      return mockJson({ ok: true });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    window.history.pushState({}, "", "/pair/http%3A%2F%2F127.0.0.1%3A41527");
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Request Pairing" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("code-digit-1")).toHaveValue("6")
+    );
+    expect(screen.getByLabelText("code-digit-2")).toHaveValue("5");
+    expect(screen.getByLabelText("code-digit-3")).toHaveValue("4");
+    expect(screen.getByLabelText("code-digit-4")).toHaveValue("3");
+    expect(screen.getByLabelText("code-digit-5")).toHaveValue("2");
+    expect(screen.getByLabelText("code-digit-6")).toHaveValue("1");
+    expect(
+      screen.getByText("Confirmation code received. Tap Confirm Code to finish pairing.")
+    ).toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:41527/api/v1/pairing/desktop-confirm",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
   it("renders live console with ipad permission boundaries", async () => {
     writeDeviceToken("http://127.0.0.1:41527", "ipad_token");
     vi.stubGlobal(

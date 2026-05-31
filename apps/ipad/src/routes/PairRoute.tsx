@@ -9,8 +9,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   confirmPairing,
+  desktopConfirmPairing,
   requestPairing
 } from "../platform/ipad/agentGateway";
+import {
+  normalizeAgentBaseUrl,
+  resolveDefaultAgentBaseUrl
+} from "../platform/ipad/defaultAgentBaseUrl";
 
 const digitCount = 6;
 
@@ -27,10 +32,10 @@ export function PairRoute() {
 
   const baseUrl = useMemo(() => {
     if (!deviceId) {
-      return "http://127.0.0.1:41527";
+      return resolveDefaultAgentBaseUrl();
     }
 
-    return decodeURIComponent(deviceId);
+    return normalizeAgentBaseUrl(decodeURIComponent(deviceId)) ?? resolveDefaultAgentBaseUrl();
   }, [deviceId]);
 
   const code = pairingStore.code.padEnd(digitCount, " ").slice(0, digitCount);
@@ -67,6 +72,20 @@ export function PairRoute() {
           expiresAt: result.expiresAt,
           state: result.state
         });
+
+        const approval = await desktopConfirmPairing(baseUrl, {
+          pairingId: result.pairingId
+        });
+
+        if (!approval.ok) {
+          pairingStore.markRejected({
+            rejectedReason: "desktop_confirm_rejected",
+            state: coercePairingState(approval.state)
+          });
+          return;
+        }
+
+        pairingStore.setCode((approval.code ?? "").replace(/\D/g, "").slice(0, digitCount));
         pairingStore.markCodeInput();
       } else {
         pairingStore.markRejected({
@@ -144,7 +163,11 @@ export function PairRoute() {
         </div>
 
         <p style={{ color: ceryxColors.onSurfaceVariant, margin: 0 }}>
-          {messageForPairingState(pairingStore.state, pairingStore.rejectedReason)}
+          {messageForPairingState(
+            pairingStore.state,
+            pairingStore.rejectedReason,
+            pairingStore.code
+          )}
         </p>
 
         <label style={{ display: "grid", gap: 6 }}>
@@ -245,14 +268,16 @@ export function PairRoute() {
   );
 }
 
-function messageForPairingState(state: string, reason: string): string {
+function messageForPairingState(state: string, reason: string, code = ""): string {
   switch (state) {
     case "requesting":
       return "Sending pairing request to Agent...";
     case "waiting_desktop_confirm":
       return "Waiting for desktop-side pairing approval.";
     case "code_input":
-      return "Enter the 6-digit code shown on desktop.";
+      return code.length === digitCount
+        ? "Confirmation code received. Tap Confirm Code to finish pairing."
+        : "Enter the 6-digit code shown on desktop.";
     case "verifying":
       return "Verifying code with Agent...";
     case "success":

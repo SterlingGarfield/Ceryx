@@ -26,6 +26,7 @@ export interface PairingDesktopConfirmRequest {
 export interface PairingDesktopConfirmResponse {
   ok: boolean;
   state: string;
+  code?: string;
 }
 
 export interface PairingConfirmResponse {

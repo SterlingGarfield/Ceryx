@@ -97,21 +97,28 @@ public sealed class PairingStateMachine
             Code: null);
     }
 
-    public async Task<bool> ApproveOnDesktopAsync(string pairingId, CancellationToken cancellationToken = default)
+    public async Task<PairingDesktopApprovalResult> ApproveOnDesktopAsync(
+        string pairingId,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(pairingId))
         {
-            return false;
+            return new PairingDesktopApprovalResult(
+                IsApproved: false,
+                State: "rejected");
         }
 
         var now = _clock.UtcNow;
+        PendingPairing? approvedPairing = null;
         lock (_sync)
         {
             ExpirePendingIfNeeded(now);
 
             if (_pending is null || !string.Equals(_pending.PairingId, pairingId, StringComparison.Ordinal))
             {
-                return false;
+                return new PairingDesktopApprovalResult(
+                    IsApproved: false,
+                    State: "rejected");
             }
 
             _pending = _pending with
@@ -119,10 +126,14 @@ public sealed class PairingStateMachine
                 DesktopConfirmed = true,
                 State = "code_input"
             };
+            approvedPairing = _pending;
         }
 
         await WriteAuditAsync("pairing_desktop_confirm", "code_input", "Desktop confirmed pairing request.", cancellationToken);
-        return true;
+        return new PairingDesktopApprovalResult(
+            IsApproved: true,
+            State: approvedPairing!.State,
+            Code: approvedPairing.Code);
     }
 
     public async Task<PairingConfirmResult> ConfirmAsync(

@@ -9,9 +9,18 @@ import {
   listTrustedDevices,
   probeAgent
 } from "../platform/ipad/agentGateway";
+import {
+  normalizeAgentBaseUrl,
+  resolveDefaultAgentBaseUrl
+} from "../platform/ipad/defaultAgentBaseUrl";
 import { localNetworkGuidance } from "../platform/ipad/localNetworkGuidance";
 
-const defaultBaseUrl = "http://127.0.0.1:41527";
+function resolveDefaultBaseUrls(): string[] {
+  return [resolveDefaultAgentBaseUrl()];
+}
+
+const defaultBaseUrls = resolveDefaultBaseUrls();
+const defaultBaseUrl = defaultBaseUrls[0] ?? resolveDefaultAgentBaseUrl();
 
 export function ConnectionsRoute() {
   const navigate = useNavigate();
@@ -30,9 +39,10 @@ export function ConnectionsRoute() {
   );
 
   const candidates = useMemo(() => {
-    const seed = [defaultBaseUrl, ...manualCandidates];
-    if (currentDevice?.baseUrl) {
-      seed.push(currentDevice.baseUrl);
+    const seed = [...defaultBaseUrls, ...manualCandidates];
+    const normalizedCurrentBaseUrl = normalizeAgentBaseUrl(currentDevice?.baseUrl);
+    if (normalizedCurrentBaseUrl) {
+      seed.push(normalizedCurrentBaseUrl);
     }
 
     return Array.from(new Set(seed.map((item) => item.trim()).filter(Boolean)));
@@ -45,8 +55,15 @@ export function ConnectionsRoute() {
     try {
       const probeResults = await Promise.all(candidates.map((baseUrl) => probeAgent(baseUrl)));
       setProbes(probeResults);
+      if (probeResults.length > 0 && probeResults.every((probe) => !probe.reachable)) {
+        setRefreshError(
+          probeResults
+            .map((probe) => `${probe.baseUrl} -> ${probe.message}`)
+            .join(" | ")
+        );
+      }
 
-      const activeBaseUrl = currentDevice?.baseUrl ?? defaultBaseUrl;
+      const activeBaseUrl = normalizeAgentBaseUrl(currentDevice?.baseUrl) ?? defaultBaseUrl;
       setTrustedDevices(await listTrustedDevices(activeBaseUrl));
 
       const activeProbe = probeResults.find((probe) => probe.baseUrl === activeBaseUrl);
@@ -195,6 +212,9 @@ export function ConnectionsRoute() {
                   latency: {probe.latencyMs ?? "-"} ms | codex: {probe.codexStatus} | state:{" "}
                   {probe.runtimeStatus}
                 </div>
+                {!probe.reachable ? (
+                  <div style={{ color: ceryxColors.error, fontSize: 12 }}>{probe.message}</div>
+                ) : null}
                 <div style={{ display: "flex", gap: 10 }}>
                   <Button
                     size="ipad"

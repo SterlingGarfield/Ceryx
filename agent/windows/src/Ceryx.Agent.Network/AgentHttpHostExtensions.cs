@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Data.Sqlite;
 
 namespace Ceryx.Agent.Network;
 
@@ -169,6 +170,11 @@ public static class AgentHttpHostExtensions
         app.MapGet(
             "/api/v1/capture/state",
             (ICaptureLifecycleService captureLifecycleService) => CaptureStateHandler(captureLifecycleService))
+            .RequireAgentAuth(Permission.ViewWindow);
+        app.MapGet(
+            "/api/v1/capture/frame",
+            (HttpContext context, ICodexWindowLocator locator, ICaptureLifecycleService captureLifecycleService, IFramePreviewService framePreviewService) =>
+                CaptureFrameHandler(context, locator, captureLifecycleService, framePreviewService))
             .RequireAgentAuth(Permission.ViewWindow);
         app.MapPost(
             "/api/v1/capture/webrtc/signal",
@@ -387,19 +393,23 @@ public static class AgentHttpHostExtensions
             return InvalidPairingPayload(context, "pairingId is required.");
         }
 
-        var approved = await pairingStateMachine.ApproveOnDesktopAsync(request.PairingId.Trim(), context.RequestAborted);
-        if (!approved)
+        var approval = await pairingStateMachine.ApproveOnDesktopAsync(
+            request.PairingId.Trim(),
+            context.RequestAborted);
+        if (!approval.IsApproved)
         {
             return Results.Json(
                 new PairingDesktopConfirmResponse(
                     Ok: false,
-                    State: "rejected"),
+                    State: "rejected",
+                    Code: null),
                 statusCode: StatusCodes.Status404NotFound);
         }
 
         return TypedResults.Ok(new PairingDesktopConfirmResponse(
             Ok: true,
-            State: "code_input"));
+            State: approval.State,
+            Code: approval.Code));
     }
 
     private static async Task<IResult> PairingConfirmHandler(
@@ -414,10 +424,42 @@ public static class AgentHttpHostExtensions
         }
 
         var logger = loggerFactory.CreateLogger("Ceryx.Agent.Pairing");
-        var result = await pairingCompletionService.ConfirmAsync(
-            request.PairingId.Trim(),
-            request.Code.Trim(),
-            context.RequestAborted);
+        PairingCompletionResult result;
+        try
+        {
+            result = await pairingCompletionService.ConfirmAsync(
+                request.PairingId.Trim(),
+                request.Code.Trim(),
+                context.RequestAborted);
+        }
+        catch (SqliteException ex)
+        {
+            var traceId = context.GetOrCreateTraceId();
+            logger.LogError(
+                ex,
+                "Pairing confirm storage failure. traceId={TraceId} sqliteCode={SqliteCode} sqliteExtendedCode={SqliteExtendedCode}",
+                traceId,
+                ex.SqliteErrorCode,
+                ex.SqliteExtendedErrorCode);
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_STORAGE_IO",
+                Message: "Failed to persist trusted device during pairing.",
+                TraceId: traceId,
+                Hint: "Retry pairing. If this repeats, restart Agent and check writable access to .workspace-data/agent."));
+        }
+        catch (Exception ex)
+        {
+            var traceId = context.GetOrCreateTraceId();
+            logger.LogError(
+                ex,
+                "Pairing confirm unexpected failure. traceId={TraceId}",
+                traceId);
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_PAIRING_CONFIRM_FAILED",
+                Message: "Pairing confirmation failed unexpectedly.",
+                TraceId: traceId,
+                Hint: "Retry pairing. If this repeats, restart Agent and review agent logs."));
+        }
 
         if (!result.IsSuccess || result.Success is null)
         {
@@ -662,6 +704,30 @@ public static class AgentHttpHostExtensions
     private static IResult CaptureStateHandler(ICaptureLifecycleService captureLifecycleService)
     {
         return TypedResults.Ok(ToCaptureStateResponse(captureLifecycleService.CurrentState));
+    }
+
+    private static async Task<IResult> CaptureFrameHandler(
+        HttpContext context,
+        ICodexWindowLocator locator,
+        ICaptureLifecycleService captureLifecycleService,
+        IFramePreviewService framePreviewService)
+    {
+        var captureState = captureLifecycleService.CurrentState;
+        var window = await locator.GetWindowAsync(context.RequestAborted);
+        var frame = await framePreviewService.CaptureLatestAsync(window, captureState, context.RequestAborted);
+        if (!frame.IsSuccess || frame.Value is null)
+        {
+            return ErrorFromAgentError(context, frame.Error ?? new AgentError(
+                "E_CAPTURE_FAILED",
+                "Failed to capture frame preview.",
+                context.GetOrCreateTraceId()));
+        }
+
+        context.Response.Headers.CacheControl = "no-store";
+        context.Response.Headers["X-Ceryx-Frame-Captured-At"] = frame.Value.CapturedAt.ToString("O");
+        context.Response.Headers["X-Ceryx-Frame-Width"] = frame.Value.Width.ToString();
+        context.Response.Headers["X-Ceryx-Frame-Height"] = frame.Value.Height.ToString();
+        return Results.File(frame.Value.Bytes, frame.Value.ContentType);
     }
 
     private static async Task<IResult> CaptureSignalHandler(
@@ -1414,6 +1480,7 @@ public static class AgentHttpHostExtensions
             "E_CODEX_NOT_FOUND" => StatusCodes.Status409Conflict,
             "E_CODEX_MINIMIZED" => StatusCodes.Status409Conflict,
             "E_CAPTURE_DENIED" => StatusCodes.Status403Forbidden,
+            "E_CAPTURE_INACTIVE" => StatusCodes.Status409Conflict,
             "E_CAPTURE_FAILED" => StatusCodes.Status500InternalServerError,
             "E_INPUT_BLOCKED" => StatusCodes.Status409Conflict,
             "E_UPLOAD_TOO_LARGE" => StatusCodes.Status413PayloadTooLarge,
@@ -1728,7 +1795,8 @@ public static class AgentHttpHostExtensions
                 ShowLatency: true,
                 KeyboardShortcuts: true,
                 NotificationsEnabled: true,
-                LogsAutoRefresh: true));
+                LogsAutoRefresh: true,
+                PreviewRefreshProfile: "balanced"));
     }
 
     private static IReadOnlyList<string> ResolveHighRiskChanges(

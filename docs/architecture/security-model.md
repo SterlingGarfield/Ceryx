@@ -54,6 +54,7 @@
 | POST | `/api/v1/capture/start` | No | `view_window` | No |
 | POST | `/api/v1/capture/stop` | No | `view_window` | No |
 | GET | `/api/v1/capture/state` | No | `view_window` | No |
+| GET | `/api/v1/capture/frame` | No | `view_window` | No |
 | POST | `/api/v1/capture/webrtc/signal` | No | `view_window` | No |
 | POST | `/api/v1/assets/upload-image` | No | `upload_image` | No |
 | GET | `/api/v1/project/diff` | No | `read_diff` | No |

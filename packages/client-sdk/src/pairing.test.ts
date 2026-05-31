@@ -61,4 +61,30 @@ describe("pairing api", () => {
       expect(response.failedAttempts).toBe(1);
     }
   });
+
+  it("returns code payload for desktop confirmation", async () => {
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            state: "code_input",
+            code: "654321"
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          }
+        )
+    });
+
+    const response = await client.desktopConfirmPairing({
+      pairingId: "pair_001"
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.state).toBe("code_input");
+    expect(response.code).toBe("654321");
+  });
 });

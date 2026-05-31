@@ -167,7 +167,8 @@ describe("ipad console files/tasks/notifications sheets", () => {
             showLatency: true,
             keyboardShortcuts: true,
             notificationsEnabled: true,
-            logsAutoRefresh: true
+            logsAutoRefresh: true,
+            previewRefreshProfile: "balanced"
           }
         });
       }

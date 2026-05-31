@@ -4,6 +4,8 @@ import {
   isTokenInvalidError,
   type AgentManagementResponse,
   type AgentStatus,
+  type CaptureFrameResult,
+  type CaptureMode,
   type CaptureStateResponse,
   type CodexWindowSnapshot,
   type InputActionResponse,
@@ -159,11 +161,18 @@ export async function getCaptureState(
   return getClient(baseUrl).getCaptureState();
 }
 
-export async function startCapture(
+export async function getCaptureFrame(
   baseUrl = defaultLocalAgentBaseUrl
+): Promise<CaptureFrameResult> {
+  return getClient(baseUrl).getCaptureFrame();
+}
+
+export async function startCapture(
+  baseUrl = defaultLocalAgentBaseUrl,
+  mode: CaptureMode = "balanced"
 ): Promise<CaptureStateResponse> {
   return getClient(baseUrl).startCapture({
-    mode: "balanced",
+    mode,
     target: "codex_window"
   });
 }

@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.Json;
 using Ceryx.Agent.Codex.WindowLocator;
 using Ceryx.Agent.Core;
+using Ceryx.Agent.Media;
+using Ceryx.Agent.Security.Pairing;
+using Ceryx.Agent.Storage;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -176,6 +179,87 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
     }
 
     [Fact]
+    public async Task CaptureFrameRoute_ReturnsJpegAndDoesNotPersistFiles()
+    {
+        SetWindow(FoundWindow("w-frame-ok", status: "focused"));
+        var client = await CreateClientAsync(Permission.ViewWindow);
+        var screenshotsPath = _factory.Services.GetRequiredService<LocalPaths>().Screenshots;
+        var filesBefore = Directory.GetFiles(screenshotsPath).Length;
+
+        var start = await client.PostAsync(
+            "/api/v1/capture/start",
+            CreateJsonContent(new CaptureStartBody("balanced", "codex_window")));
+        Assert.True(start.IsSuccessStatusCode, await start.Content.ReadAsStringAsync());
+
+        var frame = await client.GetAsync("/api/v1/capture/frame");
+        Assert.Equal(HttpStatusCode.OK, frame.StatusCode);
+        Assert.Equal("image/jpeg", frame.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(FakeWindowImageCapture.JpegBytes, await frame.Content.ReadAsByteArrayAsync());
+        Assert.Equal("1280", frame.Headers.GetValues("X-Ceryx-Frame-Width").Single());
+        Assert.Equal("720", frame.Headers.GetValues("X-Ceryx-Frame-Height").Single());
+        Assert.True(frame.Headers.Contains("X-Ceryx-Frame-Captured-At"));
+        Assert.Equal(filesBefore, Directory.GetFiles(screenshotsPath).Length);
+
+        var stop = await client.PostAsync("/api/v1/capture/stop", content: null);
+        Assert.Equal(HttpStatusCode.OK, stop.StatusCode);
+    }
+
+    [Fact]
+    public async Task CaptureFrameRoute_RejectsInactiveAndUnavailableStates()
+    {
+        SetWindow(FoundWindow("w-frame-state", status: "focused"));
+        var client = await CreateClientAsync(Permission.ViewWindow);
+
+        var reset = await client.PostAsync("/api/v1/capture/stop", content: null);
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+
+        var inactive = await client.GetAsync("/api/v1/capture/frame");
+        Assert.Equal(HttpStatusCode.Conflict, inactive.StatusCode);
+        AssertErrorCode(await ReadJsonAsync(inactive), "E_CAPTURE_INACTIVE");
+
+        var start = await client.PostAsync(
+            "/api/v1/capture/start",
+            CreateJsonContent(new CaptureStartBody("balanced", "codex_window")));
+        Assert.True(start.IsSuccessStatusCode, await start.Content.ReadAsStringAsync());
+
+        SetWindow(FoundWindow("w-frame-state", status: "minimized"));
+        var minimized = await client.GetAsync("/api/v1/capture/frame");
+        Assert.Equal(HttpStatusCode.Conflict, minimized.StatusCode);
+        AssertErrorCode(await ReadJsonAsync(minimized), "E_CODEX_MINIMIZED");
+
+        SetWindow(NotFoundWindow());
+        var missing = await client.GetAsync("/api/v1/capture/frame");
+        Assert.Equal(HttpStatusCode.Conflict, missing.StatusCode);
+        AssertErrorCode(await ReadJsonAsync(missing), "E_CODEX_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task PairingDesktopConfirmRoute_ReturnsGeneratedCode()
+    {
+        using var client = _factory.CreateClient();
+
+        var request = await client.PostAsync(
+            "/api/v1/pairing/request",
+            CreateJsonContent(new PairingRequestBody("Ceryx iPad", "ipad", "ios")));
+
+        Assert.Equal(HttpStatusCode.OK, request.StatusCode);
+        var requestRoot = await ReadJsonAsync(request);
+        Assert.True(requestRoot.GetProperty("ok").GetBoolean());
+        var pairingId = requestRoot.GetProperty("pairingId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(pairingId));
+
+        var approval = await client.PostAsync(
+            "/api/v1/pairing/desktop-confirm",
+            CreateJsonContent(new PairingDesktopConfirmBody(pairingId!)));
+
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+        var approvalRoot = await ReadJsonAsync(approval);
+        Assert.True(approvalRoot.GetProperty("ok").GetBoolean());
+        Assert.Equal("code_input", approvalRoot.GetProperty("state").GetString());
+        Assert.Equal("654321", approvalRoot.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task UploadImageRoutes_RejectInvalidPayloads()
     {
         var client = await CreateClientAsync(Permission.UploadImage);
@@ -202,13 +286,20 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
     public async Task MediaRoutes_ScreenshotAndRecording_EndToEnd()
     {
         SetWindow(FoundWindow("w-media-ok", status: "focused"));
+        var screenshotsPath = _factory.Services.GetRequiredService<LocalPaths>().Screenshots;
+        var filesBefore = Directory.GetFiles(screenshotsPath).Length;
 
         var screenshotClient = await CreateClientAsync(Permission.Screenshot);
         var screenshot = await screenshotClient.PostAsync("/api/v1/media/screenshot", content: null);
         Assert.True(screenshot.IsSuccessStatusCode, await screenshot.Content.ReadAsStringAsync());
         var screenshotRoot = await ReadJsonAsync(screenshot);
         Assert.True(screenshotRoot.GetProperty("ok").GetBoolean());
-        Assert.EndsWith(".png", screenshotRoot.GetProperty("fileName").GetString(), StringComparison.OrdinalIgnoreCase);
+        var screenshotFileName = screenshotRoot.GetProperty("fileName").GetString();
+        Assert.EndsWith(".png", screenshotFileName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(filesBefore + 1, Directory.GetFiles(screenshotsPath).Length);
+        var screenshotPath = Path.Combine(screenshotsPath, screenshotFileName!);
+        Assert.True(File.Exists(screenshotPath));
+        Assert.Equal(FakeWindowImageCapture.PngBytes, await File.ReadAllBytesAsync(screenshotPath));
 
         var recordingClient = await CreateClientAsync(Permission.Recording);
         var start = await recordingClient.PostAsync(
@@ -283,6 +374,7 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
 public sealed class RemoteControlTransportFactory : WebApplicationFactory<Program>
 {
     public TestCodexWindowLocator Locator { get; } = new();
+    public FakeWindowImageCapture WindowImageCapture { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -290,11 +382,29 @@ public sealed class RemoteControlTransportFactory : WebApplicationFactory<Progra
         {
             services.RemoveAll<ICodexWindowProbe>();
             services.RemoveAll<ICodexWindowLocator>();
+            services.RemoveAll<IWindowImageCapture>();
+            services.RemoveAll<IPairingCodeGenerator>();
             services.AddSingleton(Locator);
+            services.AddSingleton(WindowImageCapture);
             services.AddSingleton<ICodexWindowLocator>(serviceProvider =>
                 serviceProvider.GetRequiredService<TestCodexWindowLocator>());
+            services.AddSingleton<IWindowImageCapture>(serviceProvider =>
+                serviceProvider.GetRequiredService<FakeWindowImageCapture>());
+            services.AddSingleton<IPairingCodeGenerator>(new FixedPairingCodeGenerator("654321"));
         });
     }
+}
+
+public sealed class FixedPairingCodeGenerator : IPairingCodeGenerator
+{
+    private readonly string _code;
+
+    public FixedPairingCodeGenerator(string code)
+    {
+        _code = code;
+    }
+
+    public string GenerateSixDigitCode() => _code;
 }
 
 public sealed class TestCodexWindowLocator : ICodexWindowLocator
@@ -386,5 +496,39 @@ public sealed class TestCodexWindowLocator : ICodexWindowLocator
     private static bool IsUnavailable(string status)
     {
         return status is "not_found" or "multiple_candidates" or "permission_issue";
+    }
+}
+
+public sealed class FakeWindowImageCapture : IWindowImageCapture
+{
+    public static readonly byte[] JpegBytes = Convert.FromBase64String(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxAQEBAQEA8PDw8QDw8PEA8PDw8PFREWFhURFRUYHSggGBolGxUVITEhJSkrLi4uFx8zODMsNygtLisBCgoKDg0OGxAQGzAmICYtLS0tLy0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAEAAQMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAAAAQID/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEAMQAAAByA//xAAZEAEAAgMAAAAAAAAAAAAAAAABABEhMUH/2gAIAQEAAT8AqM3/xAAVEQEBAAAAAAAAAAAAAAAAAAAQIf/aAAgBAgEBPwCf/8QAFBEBAAAAAAAAAAAAAAAAAAAAEP/aAAgBAwEBPwCf/9k=");
+
+    public static readonly byte[] PngBytes = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+Z94AAAAASUVORK5CYII=");
+
+    public Task<Result<CapturedWindowFrame>> CaptureAsync(
+        CodexWindowSnapshot window,
+        WindowImageFormat format,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(window.WindowId) ||
+            string.Equals(window.Status, "not_found", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(window.Status, "unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(Result<CapturedWindowFrame>.Failure(
+                new AgentError("E_CODEX_NOT_FOUND", "Codex window not found.", Guid.NewGuid().ToString("N"))));
+        }
+
+        if (string.Equals(window.Status, "minimized", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(Result<CapturedWindowFrame>.Failure(
+                new AgentError("E_CODEX_MINIMIZED", "Codex window is minimized.", Guid.NewGuid().ToString("N"))));
+        }
+
+        var bytes = format == WindowImageFormat.Png ? PngBytes : JpegBytes;
+        var contentType = format == WindowImageFormat.Png ? "image/png" : "image/jpeg";
+        return Task.FromResult(Result<CapturedWindowFrame>.Success(
+            new CapturedWindowFrame(bytes, contentType, 1280, 720, DateTimeOffset.UtcNow)));
     }
 }

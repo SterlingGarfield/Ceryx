@@ -45,6 +45,7 @@ All input/prompt operations require:
 - `POST /api/v1/capture/start` (`view_window`)
 - `POST /api/v1/capture/stop` (`view_window`)
 - `GET /api/v1/capture/state` (`view_window`)
+- `GET /api/v1/capture/frame` (`view_window`)
 - `POST /api/v1/capture/webrtc/signal` (`view_window`)
 
 Capture start body:
@@ -57,6 +58,21 @@ Capture start body:
 ```
 
 Policy: full-desktop targets are rejected (`E_CAPTURE_DENIED`).
+
+Preview frame policy:
+
+- `GET /api/v1/capture/frame` returns an authenticated **in-memory JPEG preview frame** for the current Codex window.
+- The response body is binary `image/jpeg`.
+- The route adds:
+  - `Cache-Control: no-store`
+  - `X-Ceryx-Frame-Captured-At`
+  - `X-Ceryx-Frame-Width`
+  - `X-Ceryx-Frame-Height`
+- The route rejects when:
+  - capture is inactive (`E_CAPTURE_INACTIVE`)
+  - the Codex window is unavailable (`E_CODEX_NOT_FOUND`)
+  - the Codex window is minimized (`E_CODEX_MINIMIZED`)
+- Preview frames are **not persisted** to `Screenshots/`.
 
 ## Media
 
@@ -76,6 +92,11 @@ Recording policy:
 - low-disk precheck before start
 - max session duration 30 minutes
 
+Screenshot policy:
+
+- `POST /api/v1/media/screenshot` performs an explicit screenshot action and writes a **real PNG artifact** into `Screenshots/`.
+- Screenshot capture and preview-frame capture share the same Codex-window source surface, but only the screenshot route persists files.
+
 ## Errors
 
 Common control/media errors:
@@ -85,6 +106,7 @@ Common control/media errors:
 - `E_PERMISSION_DENIED`
 - `E_CODEX_NOT_FOUND`
 - `E_CODEX_MINIMIZED`
+- `E_CAPTURE_INACTIVE`
 - `E_INPUT_BLOCKED`
 - `E_CAPTURE_DENIED`
 - `E_CAPTURE_FAILED`

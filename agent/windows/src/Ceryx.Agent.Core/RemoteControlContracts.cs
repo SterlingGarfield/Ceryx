@@ -230,7 +230,8 @@ public sealed record ClientSettingsStateResponse(
     [property: JsonPropertyName("showLatency")] bool ShowLatency,
     [property: JsonPropertyName("keyboardShortcuts")] bool KeyboardShortcuts,
     [property: JsonPropertyName("notificationsEnabled")] bool NotificationsEnabled,
-    [property: JsonPropertyName("logsAutoRefresh")] bool LogsAutoRefresh
+    [property: JsonPropertyName("logsAutoRefresh")] bool LogsAutoRefresh,
+    [property: JsonPropertyName("previewRefreshProfile")] string PreviewRefreshProfile
 );
 
 public sealed record SettingsResponse(

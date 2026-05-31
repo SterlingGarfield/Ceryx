@@ -21,6 +21,7 @@ using Ceryx.Agent.Storage.Settings;
 using Ceryx.Agent.Storage.Sqlite;
 using Serilog;
 using Serilog.Events;
+using System.Net;
 
 const int AgentHttpPort = 41527;
 
@@ -73,6 +74,8 @@ try
     builder.Services.AddSingleton<ICaptureLifecycleService, InMemoryCaptureLifecycleService>();
     builder.Services.AddSingleton<ICaptureSignalService, NoOpCaptureSignalService>();
     builder.Services.AddSingleton<IDiskSpaceProvider, DriveDiskSpaceProvider>();
+    builder.Services.AddSingleton<IWindowImageCapture, WindowImageCapture>();
+    builder.Services.AddSingleton<IFramePreviewService, FramePreviewService>();
     builder.Services.AddSingleton<IUploadImageService, UploadImageService>();
     builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
     builder.Services.AddSingleton<IRecordingService, RecordingService>();
@@ -82,6 +85,16 @@ try
     builder.Services.AddSingleton<IProjectFileIndexService, ProjectFileIndexService>();
     builder.Services.AddSingleton<INotificationStateStore, SqliteNotificationStateStore>();
     builder.Services.AddSingleton<IAgentTrayShell, AgentTrayShell>();
+    builder.Services.AddCors(options =>
+    {
+        options.AddPolicy("CeryxLocalClients", policy =>
+        {
+            policy
+                .SetIsOriginAllowed(IsAllowedCorsOrigin)
+                .AllowAnyMethod()
+                .AllowAnyHeader();
+        });
+    });
 
     var app = builder.Build();
     app.Lifetime.ApplicationStarted.Register(() =>
@@ -102,6 +115,7 @@ try
         string.Join(", ", trayShell.Commands.Select(static command => command.Id)));
 
     app.UseAgentRequestTracing();
+    app.UseCors("CeryxLocalClients");
     app.UseAgentAuthorization();
     app.MapAgentRoutes(localPaths);
 
@@ -115,6 +129,41 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+static bool IsAllowedCorsOrigin(string origin)
+{
+    if (string.IsNullOrWhiteSpace(origin))
+    {
+        return false;
+    }
+
+    var configuredAllowedOrigins = Environment.GetEnvironmentVariable("CERYX_ALLOWED_ORIGINS")?
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
+    if (configuredAllowedOrigins.Any(item =>
+            string.Equals(item, origin, StringComparison.OrdinalIgnoreCase)))
+    {
+        return true;
+    }
+
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+    {
+        return false;
+    }
+
+    if (!string.Equals(originUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(originUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    if (string.Equals(originUri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    return IPAddress.TryParse(originUri.Host, out var originIp) &&
+           AgentNetworkBindingResolver.IsLanOrLoopback(originIp);
 }
 
 public partial class Program;

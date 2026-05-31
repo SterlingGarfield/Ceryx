@@ -102,7 +102,8 @@ describe("ipad console settings sheet", () => {
             showLatency: true,
             keyboardShortcuts: true,
             notificationsEnabled: true,
-            logsAutoRefresh: true
+            logsAutoRefresh: true,
+            previewRefreshProfile: "balanced"
           }
         });
       }
@@ -124,7 +125,8 @@ describe("ipad console settings sheet", () => {
             showLatency: true,
             keyboardShortcuts: true,
             notificationsEnabled: true,
-            logsAutoRefresh: true
+            logsAutoRefresh: true,
+            previewRefreshProfile: "balanced"
           }
         });
       }

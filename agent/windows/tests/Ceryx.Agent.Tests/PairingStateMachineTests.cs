@@ -46,7 +46,7 @@ public sealed class PairingStateMachineTests
 
         var request = await machine.RequestAsync(new PairingRequestContext("ipad", "ipad", "ios"));
         var approved = await machine.ApproveOnDesktopAsync(request.PairingId!);
-        Assert.True(approved);
+        Assert.True(approved.IsApproved);
 
         for (var i = 0; i < 4; i++)
         {
@@ -79,12 +79,25 @@ public sealed class PairingStateMachineTests
         Assert.Equal("waiting_desktop_confirm", pendingConfirm.State);
 
         var approved = await machine.ApproveOnDesktopAsync(request.PairingId!);
-        Assert.True(approved);
+        Assert.True(approved.IsApproved);
 
         var success = await machine.ConfirmAsync(request.PairingId!, "654321");
         Assert.True(success.IsSuccess);
         Assert.Equal("success", success.State);
         Assert.Equal("idle", machine.GetState());
+    }
+
+    [Fact]
+    public async Task PairingDesktopApproval_ReturnsCodeForCodeInputStep()
+    {
+        var machine = CreateStateMachine(new FakeClock(DateTimeOffset.UtcNow), "654321");
+        var request = await machine.RequestAsync(new PairingRequestContext("ipad", "ipad", "ios"));
+
+        var approved = await machine.ApproveOnDesktopAsync(request.PairingId!);
+
+        Assert.True(approved.IsApproved);
+        Assert.Equal("code_input", approved.State);
+        Assert.Equal("654321", approved.Code);
     }
 
     private static PairingStateMachine CreateStateMachine(FakeClock clock, string code)

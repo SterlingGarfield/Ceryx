@@ -1,5 +1,6 @@
 using Ceryx.Agent.Codex.WindowLocator;
 using Ceryx.Agent.Core;
+using Ceryx.Agent.Capture;
 
 namespace Ceryx.Agent.Media;
 
@@ -35,6 +36,38 @@ public interface IScreenshotService
 {
     Task<Result<ScreenshotResponse>> CaptureAsync(
         CodexWindowSnapshot window,
+        CancellationToken cancellationToken = default);
+}
+
+public enum WindowImageFormat
+{
+    Jpeg,
+    Png
+}
+
+public sealed record CapturedWindowFrame(
+    byte[] Bytes,
+    string ContentType,
+    int Width,
+    int Height,
+    DateTimeOffset CapturedAt
+);
+
+public interface IWindowImageCapture
+{
+    Task<Result<CapturedWindowFrame>> CaptureAsync(
+        CodexWindowSnapshot window,
+        WindowImageFormat format,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IFramePreviewService
+{
+    CapturedWindowFrame? LatestFrame { get; }
+
+    Task<Result<CapturedWindowFrame>> CaptureLatestAsync(
+        CodexWindowSnapshot window,
+        CaptureState captureState,
         CancellationToken cancellationToken = default);
 }
 

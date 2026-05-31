@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Ceryx.Agent.Storage.Sqlite;
 
 namespace Ceryx.Agent.Storage;
 
@@ -40,6 +41,7 @@ public sealed class StorageBootstrapper
 
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
+        await SqliteConnectionFactory.ConfigureConnectionAsync(connection, cancellationToken);
 
         await EnsureSchemaAsync(connection, cancellationToken);
         await _migrationRunner.RunAsync(connection, cancellationToken);

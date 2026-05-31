@@ -40,5 +40,6 @@ _tmp_*
 # local workspace data and tool caches
 .cache/
 .workspace-data/
+.codex-artifacts/
 apps/*/.cache-verify/
 apps/*/.cache-verify-node/

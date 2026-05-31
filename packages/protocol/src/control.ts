@@ -8,6 +8,9 @@ export const CaptureModes = [
 ] as const;
 export type CaptureMode = (typeof CaptureModes)[number];
 
+export const PreviewRefreshProfiles = ["balanced", "high_frequency"] as const;
+export type PreviewRefreshProfile = (typeof PreviewRefreshProfiles)[number];
+
 export interface CodexWindowSnapshot {
   status: CodexWindowStatus | string;
   windowId?: string | null;
@@ -180,6 +183,7 @@ export interface ClientSettingsState {
   keyboardShortcuts: boolean;
   notificationsEnabled: boolean;
   logsAutoRefresh: boolean;
+  previewRefreshProfile: PreviewRefreshProfile | string;
 }
 
 export interface SettingsResponse {

@@ -93,7 +93,8 @@ describe("desktop console settings workspace", () => {
             showLatency: true,
             keyboardShortcuts: true,
             notificationsEnabled: true,
-            logsAutoRefresh: true
+            logsAutoRefresh: true,
+            previewRefreshProfile: "balanced"
           }
         });
       }
@@ -134,7 +135,8 @@ describe("desktop console settings workspace", () => {
             showLatency: true,
             keyboardShortcuts: true,
             notificationsEnabled: true,
-            logsAutoRefresh: true
+            logsAutoRefresh: true,
+            previewRefreshProfile: "balanced"
           }
         });
       }

@@ -15,6 +15,12 @@ public sealed record PairingRequestResult(
     string? RejectedReason = null
 );
 
+public sealed record PairingDesktopApprovalResult(
+    bool IsApproved,
+    string State,
+    string? Code = null
+);
+
 public sealed record PairingConfirmResult(
     bool IsSuccess,
     string State,

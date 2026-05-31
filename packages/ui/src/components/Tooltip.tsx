@@ -12,7 +12,12 @@ export function Tooltip({ children, content, anchorLabel, open = false }: Toolti
   const tooltipId = useId();
 
   return (
-    <span style={{ display: "inline-grid", gap: 4 }}>
+    <span
+      style={{
+        display: "inline-flex",
+        position: "relative"
+      }}
+    >
       <span aria-describedby={tooltipId} aria-label={anchorLabel}>
         {children}
       </span>
@@ -26,8 +31,15 @@ export function Tooltip({ children, content, anchorLabel, open = false }: Toolti
           borderRadius: ceryxRadii.desktopButton,
           color: ceryxColors.surfaceContainerLowest,
           fontSize: 12,
+          left: "50%",
           maxWidth: 280,
-          padding: "6px 8px"
+          pointerEvents: "none",
+          padding: "6px 8px",
+          position: "absolute",
+          top: "calc(100% + 6px)",
+          transform: "translateX(-50%)",
+          whiteSpace: "nowrap",
+          zIndex: 1000
         }}
       >
         {content}

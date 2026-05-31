@@ -2,7 +2,7 @@
 
 ## Context
 
-- Generated at: 2026-05-24 16:12:41 +08:00
+- Generated at: 2026-05-31 12:39:30 +08:00
 - Machine: LAPTOP-U5PORPA2
 - OS: Microsoft Windows NT 10.0.26200.0
 - Logical processors: 20
@@ -14,12 +14,12 @@
 
 | Metric | Target | Measured | Result |
 | --- | --- | --- | --- |
-| Desktop local connect | <= 1000 ms | 0.18 ms (P95) | PASS |
-| Paired iPad connect | <= 3000 ms | 1.34 ms (P95) | PASS |
-| Input latency | <= 80 ms | 9.85 ms (P95) | PASS |
-| Diff (5000 lines) | <= 1000 ms | 0.75 ms (P95) | PASS |
-| Agent idle CPU | < 3% | 0.30% | PASS |
-| Agent capture CPU | < 25% | 0.41% | PASS |
+| Desktop local connect | <= 1000 ms | 0.24 ms (P95) | PASS |
+| Paired iPad connect | <= 3000 ms | 3.34 ms (P95) | PASS |
+| Input latency | <= 80 ms | 9.82 ms (P95) | PASS |
+| Diff (5000 lines) | <= 1000 ms | 7.13 ms (P95) | PASS |
+| Agent idle CPU | < 3% | 0.06% | PASS |
+| Agent capture CPU | < 25% | 0.67% | PASS |
 
 ## Method
 

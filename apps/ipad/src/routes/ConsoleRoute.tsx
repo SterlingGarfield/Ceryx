@@ -1,5 +1,11 @@
 import { ceryxColors } from "@ceryx/design-tokens";
-import { CeryxApiError } from "@ceryx/client-sdk";
+import {
+  CeryxApiError,
+  normalizePreviewRefreshProfile,
+  type CaptureFrameResult,
+  type CaptureMode,
+  type PreviewRefreshProfile
+} from "@ceryx/client-sdk";
 import type {
   AgentNotificationEntry,
   AgentLogEntry,
@@ -23,13 +29,15 @@ import {
   resolveProtocolError,
   useConnectionStore,
   usePromptStore,
-  useRemoteSessionStore
+  useRemoteSessionStore,
+  useViewportPreview
 } from "@ceryx/feature-remote-control";
 import { Button, Panel, StatusChip, TextArea } from "@ceryx/ui";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   clearNotifications,
+  getCaptureFrame,
   getCaptureState,
   getCodexWindow,
   markNotificationRead,
@@ -54,8 +62,12 @@ import {
   takeScreenshot,
   uploadImageAsset
 } from "../platform/ipad/agentGateway";
+import {
+  normalizeAgentBaseUrl,
+  resolveDefaultAgentBaseUrl
+} from "../platform/ipad/defaultAgentBaseUrl";
 
-const fallbackBaseUrl = "http://127.0.0.1:41527";
+const fallbackBaseUrl = resolveDefaultAgentBaseUrl();
 const idleCaptureState = {
   ok: true as const,
   active: false,
@@ -70,6 +82,9 @@ const defaultProjectId = "workspace-default";
 const defaultLogsPageSize = 80;
 const ipadLogRowHeight = 64;
 const ipadClientSettingsStorageKey = "ceryx.ipad.client-settings.v1";
+const defaultPreviewRefreshProfile: PreviewRefreshProfile = "balanced";
+const balancedPreviewPollMs = 1000;
+const highFrequencyPreviewPollMs = 400;
 
 const ipadSettingsGroups = [
   {
@@ -201,7 +216,7 @@ export function ConsoleRoute() {
   const [notifications, setNotifications] = useState<AgentNotificationEntry[]>([]);
   const [notificationsUnread, setNotificationsUnread] = useState(0);
 
-  const activeBaseUrl = currentDevice?.baseUrl ?? fallbackBaseUrl;
+  const activeBaseUrl = normalizeAgentBaseUrl(currentDevice?.baseUrl) ?? fallbackBaseUrl;
   const deviceName = currentDevice?.deviceName ?? "Windows Agent";
   const sessionDeviceId = currentDevice?.deviceId ?? `device:${activeBaseUrl}`;
 
@@ -308,7 +323,11 @@ export function ConsoleRoute() {
       remoteSession.setCaptureState(captureState);
       remoteSession.setPermissions(permissions);
       remoteSession.markActive();
-      setViewportMessage("iPad remote console is ready.");
+      setViewportMessage(
+        captureState.active
+          ? "Waiting for real frame..."
+          : "Capture inactive. Start capture to load a real frame."
+      );
     } catch (error) {
       remoteSession.setPermissions([]);
       remoteSession.setCaptureState(idleCaptureState);
@@ -326,6 +345,38 @@ export function ConsoleRoute() {
     () => remoteSession.status !== "idle" && remoteSession.status !== "error",
     [remoteSession.status]
   );
+  const previewRefreshProfile = normalizePreviewRefreshProfile(
+    clientSettingsDraft?.previewRefreshProfile ??
+      clientSettingsSource?.previewRefreshProfile ??
+      defaultPreviewRefreshProfile
+  );
+  const previewPollIntervalMs = previewRefreshProfile === "high_frequency"
+    ? highFrequencyPreviewPollMs
+    : balancedPreviewPollMs;
+  const previewCaptureMode: CaptureMode = previewRefreshProfile === "high_frequency"
+    ? "low_latency"
+    : "balanced";
+  const viewportPreview = useViewportPreview({
+    enabled: connected && remoteSession.captureState.active,
+    pollIntervalMs: previewPollIntervalMs,
+    sessionKey: `${sessionDeviceId}:${activeBaseUrl}`,
+    fetchFrame: () => getCaptureFrame(activeBaseUrl),
+    resolveErrorMessage: (error) =>
+      resolveProtocolError(error, "Failed to load preview frame.").message,
+    onFrame: (frame: CaptureFrameResult) => {
+      remoteSession.setCaptureState({
+        ...remoteSession.captureState,
+        width: frame.width || remoteSession.captureState.width,
+        height: frame.height || remoteSession.captureState.height
+      });
+    }
+  });
+  const viewportOverlayMessage = resolveViewportOverlayMessage({
+    captureActive: remoteSession.captureState.active,
+    hasFrame: viewportPreview.hasFrame,
+    previewError: viewportPreview.lastError,
+    statusMessage: viewportMessage
+  });
 
   const canControlInput = connected && hasPermission(remoteSession.permissions, "control_input");
   const canUploadImage = connected && hasPermission(remoteSession.permissions, "upload_image");
@@ -1255,11 +1306,17 @@ export function ConsoleRoute() {
             void runToolbarAction(async () => {
               const response = remoteSession.captureState.active
                 ? await stopCapture(activeBaseUrl)
-                : await startCapture(activeBaseUrl);
+                : await startCapture(activeBaseUrl, previewCaptureMode);
               remoteSession.setCaptureState(response);
+              if (response.active) {
+                setViewportMessage("Waiting for real frame...");
+                await viewportPreview.refresh();
+              } else {
+                setViewportMessage("Capture stopped. Last successful frame is frozen.");
+              }
               return {
                 message: response.active
-                  ? "Capture session started."
+                  ? `Capture session started (${previewRefreshProfile}).`
                   : "Capture session stopped."
               };
             })
@@ -1269,20 +1326,50 @@ export function ConsoleRoute() {
             ref={gestureSurfaceRef}
             data-testid="ipad-gesture-surface"
             style={{
-              display: "grid",
-              gap: 12,
               minHeight: 210,
+              overflow: "hidden",
+              position: "relative",
               touchAction: "none"
             }}
             onTouchStart={handleGestureTouchStart}
             onTouchMove={handleGestureTouchMove}
             onTouchEnd={handleGestureTouchEnd}
           >
-            <strong style={{ fontSize: 20 }}>{codexTitle}</strong>
-            <div style={{ color: "#d0c7bf", maxWidth: 560 }}>{viewportMessage}</div>
-            <div style={{ color: "#d0c7bf", fontSize: 13 }}>
-              session={remoteSession.sessionId || "n/a"} | capture=
-              {remoteSession.captureState.active ? remoteSession.captureState.mode : "idle"}
+            {viewportPreview.frameUrl ? (
+              <img
+                alt="Codex viewport frame"
+                data-testid="ipad-viewport-frame"
+                src={viewportPreview.frameUrl}
+                style={{
+                  display: "block",
+                  height: "100%",
+                  inset: 0,
+                  objectFit: "contain",
+                  position: "absolute",
+                  width: "100%"
+                }}
+              />
+            ) : null}
+            <div
+              style={{
+                background: viewportPreview.frameUrl
+                  ? "linear-gradient(180deg, rgba(20,18,16,0.34), rgba(20,18,16,0.52))"
+                  : "linear-gradient(180deg, rgba(20,18,16,0.96), rgba(46,39,34,0.98))",
+                display: "grid",
+                gap: 12,
+                inset: 0,
+                padding: 18,
+                pointerEvents: "none",
+                position: "absolute"
+              }}
+            >
+              <strong style={{ fontSize: 20 }}>{codexTitle}</strong>
+              <div style={{ color: "#d0c7bf", maxWidth: 560 }}>{viewportOverlayMessage}</div>
+              <div style={{ color: "#d0c7bf", fontSize: 13 }}>
+                session={remoteSession.sessionId || "n/a"} | capture=
+                {remoteSession.captureState.active ? remoteSession.captureState.mode : "idle"} | frame=
+                {viewportPreview.capturedAt || "none"}
+              </div>
             </div>
           </div>
         </RemoteViewport>
@@ -1656,6 +1743,28 @@ export function ConsoleRoute() {
                     {settingsSection === "capture" ? (
                       <div style={{ display: "grid", gap: 12 }}>
                         <strong>Capture</strong>
+                        <label style={{ display: "grid", gap: 4 }}>
+                          <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+                            Preview refresh profile
+                          </span>
+                          <select
+                            value={normalizePreviewRefreshProfile(clientSettingsDraft.previewRefreshProfile)}
+                            onChange={(event) =>
+                              setClientSettingsDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      previewRefreshProfile: normalizePreviewRefreshProfile(event.target.value)
+                                    }
+                                  : current
+                              )
+                            }
+                            style={ipadFieldStyle}
+                          >
+                            <option value="balanced">balanced (1000 ms)</option>
+                            <option value="high_frequency">high_frequency (400 ms)</option>
+                          </select>
+                        </label>
                         <label style={{ display: "grid", gap: 4 }}>
                           <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
                             Default capture mode
@@ -2653,7 +2762,9 @@ function equalClientSettings(a: ClientSettingsState, b: ClientSettingsState): bo
     a.showLatency === b.showLatency &&
     a.keyboardShortcuts === b.keyboardShortcuts &&
     a.notificationsEnabled === b.notificationsEnabled &&
-    a.logsAutoRefresh === b.logsAutoRefresh
+    a.logsAutoRefresh === b.logsAutoRefresh &&
+    normalizePreviewRefreshProfile(a.previewRefreshProfile) ===
+      normalizePreviewRefreshProfile(b.previewRefreshProfile)
   );
 }
 
@@ -2707,6 +2818,34 @@ function toViewportTokenState(tokenState: "missing" | "valid" | "invalid" | "exp
   return tokenState === "valid" ? "verified" : tokenState;
 }
 
+function resolveViewportOverlayMessage({
+  captureActive,
+  hasFrame,
+  previewError,
+  statusMessage
+}: {
+  captureActive: boolean;
+  hasFrame: boolean;
+  previewError: string;
+  statusMessage: string;
+}): string {
+  if (previewError) {
+    return hasFrame
+      ? `Preview refresh failed. Showing last frame. ${previewError}`
+      : previewError;
+  }
+
+  if (captureActive) {
+    return hasFrame ? "Live viewport preview active." : "Waiting for real frame...";
+  }
+
+  if (hasFrame) {
+    return "Capture stopped. Last successful frame is frozen.";
+  }
+
+  return statusMessage;
+}
+
 function readClientSettingsSnapshot(
   storageKey: string,
   fallback: ClientSettingsState
@@ -2728,7 +2867,10 @@ function readClientSettingsSnapshot(
       showLatency: parsed.showLatency ?? fallback.showLatency,
       keyboardShortcuts: parsed.keyboardShortcuts ?? fallback.keyboardShortcuts,
       notificationsEnabled: parsed.notificationsEnabled ?? fallback.notificationsEnabled,
-      logsAutoRefresh: parsed.logsAutoRefresh ?? fallback.logsAutoRefresh
+      logsAutoRefresh: parsed.logsAutoRefresh ?? fallback.logsAutoRefresh,
+      previewRefreshProfile: normalizePreviewRefreshProfile(
+        parsed.previewRefreshProfile ?? fallback.previewRefreshProfile ?? defaultPreviewRefreshProfile
+      )
     };
   } catch {
     return fallback;

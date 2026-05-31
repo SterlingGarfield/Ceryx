@@ -153,7 +153,8 @@ public sealed class PairingTrustedDevicesFlowTests
             var request = await stateMachine.RequestAsync(new PairingRequestContext("My iPad", "ipad", "ios"));
             Assert.True(request.IsAccepted);
             Assert.NotNull(request.PairingId);
-            Assert.True(await stateMachine.ApproveOnDesktopAsync(request.PairingId!));
+            var approved = await stateMachine.ApproveOnDesktopAsync(request.PairingId!);
+            Assert.True(approved.IsApproved);
 
             var completion = await completionService.ConfirmAsync(request.PairingId!, "654321");
             Assert.True(completion.IsSuccess);
