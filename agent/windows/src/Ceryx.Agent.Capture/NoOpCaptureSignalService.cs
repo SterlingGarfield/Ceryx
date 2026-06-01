@@ -161,7 +161,7 @@ public sealed class NoOpCaptureSignalService : ICaptureSignalService
     }
 }
 
-file sealed record WebRtcSessionState(
+internal sealed record WebRtcSessionState(
     string SessionId,
     string? OfferSdp,
     string? AnswerSdp,

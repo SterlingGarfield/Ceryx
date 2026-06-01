@@ -51,6 +51,9 @@
 | POST | `/api/v1/input/hotkey` | No | `control_input` | No |
 | POST | `/api/v1/input/text` | No | `control_input` | No |
 | POST | `/api/v1/prompt/send` | No | `send_prompt` | No |
+| POST | `/api/v1/clipboard/send` | No | `manage_agent` | No |
+| GET | `/api/v1/clipboard/receive` | No | `manage_agent` | No |
+| POST | `/api/v1/clipboard/clear` | No | `manage_agent` | No |
 | POST | `/api/v1/capture/start` | No | `view_window` | No |
 | POST | `/api/v1/capture/stop` | No | `view_window` | No |
 | GET | `/api/v1/capture/state` | No | `view_window` | No |

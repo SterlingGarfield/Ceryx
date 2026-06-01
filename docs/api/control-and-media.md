@@ -99,8 +99,34 @@ Capture backend selection:
 
 - Capture backend can be requested with env `CERYX_CAPTURE_BACKEND=auto|wgc|gdi`.
 - Runtime status exposure:
-  - `GET /api/v1/agent/status` now includes `captureBackend`.
+- `GET /api/v1/agent/status` now includes `captureBackend`.
   - `auto` prefers WGC on supported Windows runtime and falls back to GDI when unavailable.
+
+## Clipboard
+
+- `POST /api/v1/clipboard/send` (`manage_agent`)
+- `GET /api/v1/clipboard/receive` (`manage_agent`)
+- `POST /api/v1/clipboard/clear` (`manage_agent`)
+
+Clipboard payload policy:
+
+- `type` supports `text` and `image`.
+- `POST /api/v1/clipboard/send` accepts:
+  - `type`
+  - `content` (plain text or base64 image payload)
+  - `mimeType`
+- `GET /api/v1/clipboard/receive` returns:
+  - `type`
+  - `content`
+  - `mimeType`
+  - `sizeBytes`
+- Maximum payload size is 10MB (`E_CLIPBOARD_TOO_LARGE`).
+- Empty clipboard returns `E_CLIPBOARD_EMPTY`.
+- Invalid type/content returns `E_CLIPBOARD_INVALID_REQUEST`.
+- Clipboard actions write audit events:
+  - `clipboard.send`
+  - `clipboard.receive`
+  - `clipboard.clear`
 
 ## Media
 
@@ -138,6 +164,9 @@ Common control/media errors:
 - `E_INPUT_BLOCKED`
 - `E_CAPTURE_DENIED`
 - `E_CAPTURE_FAILED`
+- `E_CLIPBOARD_INVALID_REQUEST`
+- `E_CLIPBOARD_TOO_LARGE`
+- `E_CLIPBOARD_EMPTY`
 - `E_UPLOAD_TOO_LARGE`
 - `E_RECORDING_BUSY`
 - `E_DISK_LOW`

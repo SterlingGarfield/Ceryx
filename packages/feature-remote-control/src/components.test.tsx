@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CodexToolbar } from "./CodexToolbar";
 import { PromptComposer } from "./PromptComposer";
@@ -72,5 +72,35 @@ describe("toolbar", () => {
 
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Copy Output" })).toBeEnabled();
+  });
+
+  it("enables clipboard actions only with manage_agent permission", () => {
+    const onPasteToWindows = vi.fn();
+    const onCopyFromWindows = vi.fn();
+
+    const view = render(
+      <CodexToolbar
+        connected
+        permissions={["copy_output"]}
+        onPasteToWindows={onPasteToWindows}
+        onCopyFromWindows={onCopyFromWindows}
+      />
+    );
+    const toolbar = within(view.container);
+
+    expect(toolbar.getByRole("button", { name: "Paste to Windows" })).toBeDisabled();
+    expect(toolbar.getByRole("button", { name: "Copy from Windows" })).toBeDisabled();
+
+    view.rerender(
+      <CodexToolbar
+        connected
+        permissions={["manage_agent"]}
+        onPasteToWindows={onPasteToWindows}
+        onCopyFromWindows={onCopyFromWindows}
+      />
+    );
+
+    expect(toolbar.getByRole("button", { name: "Paste to Windows" })).toBeEnabled();
+    expect(toolbar.getByRole("button", { name: "Copy from Windows" })).toBeEnabled();
   });
 });

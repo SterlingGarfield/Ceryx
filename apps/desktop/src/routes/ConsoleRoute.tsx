@@ -58,6 +58,8 @@ import {
   requestProjectTest,
   requestSettings,
   markNotificationRead,
+  receiveClipboard,
+  sendClipboard,
   sendPrompt,
   startCapture,
   startRecordingCapture,
@@ -941,6 +943,60 @@ export function ConsoleRoute() {
     }
   }
 
+  async function handlePasteToWindowsClipboard() {
+    if (!navigator.clipboard?.readText) {
+      return { message: "Local clipboard read is unavailable in this browser context." };
+    }
+
+    const text = await navigator.clipboard.readText();
+    if (!text.trim()) {
+      return { message: "Local clipboard is empty." };
+    }
+
+    const response = await sendClipboard(
+      {
+        type: "text",
+        content: text,
+        mimeType: "text/plain"
+      },
+      defaultLocalAgentBaseUrl
+    );
+    return {
+      message: `Clipboard sent to Windows (${response.sizeBytes} bytes).`
+    };
+  }
+
+  async function handleCopyFromWindowsClipboard() {
+    if (!navigator.clipboard) {
+      return { message: "Local clipboard access is unavailable in this browser context." };
+    }
+
+    const payload = await receiveClipboard(defaultLocalAgentBaseUrl);
+    if (payload.type === "text") {
+      if (!navigator.clipboard.writeText) {
+        return { message: "Local clipboard write is unavailable in this browser context." };
+      }
+
+      await navigator.clipboard.writeText(payload.content);
+      setDraft(payload.content);
+      return { message: "Windows clipboard copied locally and inserted into prompt draft." };
+    }
+
+    if (payload.type === "image") {
+      if (typeof ClipboardItem === "undefined" || !navigator.clipboard.write) {
+        return { message: "Image clipboard is unavailable in this browser." };
+      }
+
+      const imageBlob = decodeBase64ToBlob(payload.content, payload.mimeType);
+      await navigator.clipboard.write([
+        new ClipboardItem({ [payload.mimeType || "image/png"]: imageBlob })
+      ]);
+      return { message: "Windows image clipboard copied locally." };
+    }
+
+    return { message: "Clipboard payload type is not supported on this client." };
+  }
+
   function handleAskCodexToExplain() {
     setDraft(
       [
@@ -1047,6 +1103,12 @@ export function ConsoleRoute() {
         return;
       }
 
+      if (event.ctrlKey && event.shiftKey && key === "v" && canManageAgent) {
+        event.preventDefault();
+        void runToolbarAction(() => handlePasteToWindowsClipboard());
+        return;
+      }
+
       if (event.ctrlKey && key === "l" && canViewWindow) {
         event.preventDefault();
         void runToolbarAction(async () => {
@@ -1093,6 +1155,7 @@ export function ConsoleRoute() {
     canRunTest,
     canScreenshot,
     canViewWindow,
+    canManageAgent,
     toolbarBusy,
     recordingActive,
     remoteSession.status,
@@ -1167,6 +1230,12 @@ export function ConsoleRoute() {
           onStop={() => void handleStop()}
           onRecord={() => void handleRecord()}
           onCopyOutput={() => void handleCopyOutput()}
+          onPasteToWindows={() =>
+            void runToolbarAction(() => handlePasteToWindowsClipboard())
+          }
+          onCopyFromWindows={() =>
+            void runToolbarAction(() => handleCopyFromWindowsClipboard())
+          }
         />
       </div>
 
@@ -2293,6 +2362,7 @@ export function ConsoleRoute() {
                           <li>`Ctrl+G`: open Logs Workspace</li>
                           <li>`Ctrl+T`: run project test request</li>
                           <li>`Ctrl+Shift+S`: take screenshot</li>
+                          <li>`Ctrl+Shift+V`: paste local clipboard to Windows</li>
                         </ul>
                       </div>
                     ) : null}
@@ -3010,6 +3080,20 @@ function resolveViewportOverlayMessage({
   }
 
   return statusMessage;
+}
+
+function decodeBase64ToBlob(content: string, mimeType: string): Blob {
+  const markerIndex = content.indexOf("base64,");
+  const payload = markerIndex >= 0 ? content.slice(markerIndex + "base64,".length) : content;
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], {
+    type: mimeType || "image/png"
+  });
 }
 
 function readClientSettingsSnapshot(

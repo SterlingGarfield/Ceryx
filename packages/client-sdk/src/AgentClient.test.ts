@@ -330,6 +330,67 @@ describe("AgentClient", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ prompt: "run tests", submit: true }));
   });
 
+  it("sends and receives clipboard payloads through clipboard endpoints", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith("/api/v1/clipboard/send")) {
+          return Response.json({
+            ok: true,
+            type: "text",
+            mimeType: "text/plain",
+            sizeBytes: 24
+          });
+        }
+
+        if (String(url).endsWith("/api/v1/clipboard/receive")) {
+          return Response.json({
+            ok: true,
+            type: "text",
+            content: "clipboard payload",
+            mimeType: "text/plain",
+            sizeBytes: 24
+          });
+        }
+
+        return Response.json({
+          ok: true,
+          cleared: true
+        });
+      }
+    });
+
+    const sendResponse = await client.sendClipboard({
+      type: "text",
+      content: "clipboard payload",
+      mimeType: "text/plain"
+    });
+    const receiveResponse = await client.receiveClipboard();
+    const clearResponse = await client.clearClipboard();
+
+    expect(sendResponse.ok).toBe(true);
+    expect(sendResponse.type).toBe("text");
+    expect(receiveResponse.content).toBe("clipboard payload");
+    expect(clearResponse.cleared).toBe(true);
+
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/clipboard/send");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(
+      JSON.stringify({
+        type: "text",
+        content: "clipboard payload",
+        mimeType: "text/plain"
+      })
+    );
+    expect(calls[1]?.url).toBe("http://127.0.0.1:41527/api/v1/clipboard/receive");
+    expect(calls[1]?.init?.method).toBe("GET");
+    expect(calls[2]?.url).toBe("http://127.0.0.1:41527/api/v1/clipboard/clear");
+    expect(calls[2]?.init?.method).toBe("POST");
+  });
+
   it("posts local management action to restart endpoint", async () => {
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     const client = new AgentClient({

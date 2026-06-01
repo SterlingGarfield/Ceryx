@@ -1,5 +1,9 @@
 import {
   type AgentSettingsPatch,
+  type ClipboardClearResponse,
+  type ClipboardReceiveResponse,
+  type ClipboardSendRequest,
+  type ClipboardSendResponse,
   AgentClient,
   isTokenInvalidError,
   type AgentManagementResponse,
@@ -198,6 +202,25 @@ export async function sendPrompt(
   baseUrl = defaultLocalAgentBaseUrl
 ): Promise<PromptSendResponse> {
   return getClient(baseUrl).sendPrompt({ prompt, submit });
+}
+
+export async function sendClipboard(
+  request: ClipboardSendRequest,
+  baseUrl = defaultLocalAgentBaseUrl
+): Promise<ClipboardSendResponse> {
+  return getClient(baseUrl).sendClipboard(request);
+}
+
+export async function receiveClipboard(
+  baseUrl = defaultLocalAgentBaseUrl
+): Promise<ClipboardReceiveResponse> {
+  return getClient(baseUrl).receiveClipboard();
+}
+
+export async function clearClipboard(
+  baseUrl = defaultLocalAgentBaseUrl
+): Promise<ClipboardClearResponse> {
+  return getClient(baseUrl).clearClipboard();
 }
 
 export async function approveFromToolbar(

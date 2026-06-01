@@ -10,7 +10,9 @@ type ToolbarAction =
   | "screenshot"
   | "stop"
   | "record"
-  | "copy-output";
+  | "copy-output"
+  | "paste-to-windows"
+  | "copy-from-windows";
 
 export interface CodexToolbarProps {
   size?: "desktop" | "ipad";
@@ -27,6 +29,8 @@ export interface CodexToolbarProps {
   onStop?: () => void;
   onRecord?: () => void;
   onCopyOutput?: () => void;
+  onPasteToWindows?: () => void;
+  onCopyFromWindows?: () => void;
 }
 
 function canRunAction(
@@ -54,6 +58,9 @@ function canRunAction(
       return hasPermission(permissions, "recording");
     case "copy-output":
       return hasPermission(permissions, "copy_output");
+    case "paste-to-windows":
+    case "copy-from-windows":
+      return hasPermission(permissions, "manage_agent");
     default:
       return false;
   }
@@ -73,7 +80,9 @@ export function CodexToolbar({
   onScreenshot,
   onStop,
   onRecord,
-  onCopyOutput
+  onCopyOutput,
+  onPasteToWindows,
+  onCopyFromWindows
 }: CodexToolbarProps) {
   const actions: Array<{
     key: ToolbarAction;
@@ -88,7 +97,9 @@ export function CodexToolbar({
     { key: "screenshot", label: "Screenshot", variant: "secondary", onClick: onScreenshot },
     { key: "stop", label: captureActive || recordingActive ? "Stop Active" : "Stop", variant: "ghost", onClick: onStop },
     { key: "record", label: recordingActive ? "Stop Record" : "Record", variant: "ghost", onClick: onRecord },
-    { key: "copy-output", label: "Copy Output", variant: "ghost", onClick: onCopyOutput }
+    { key: "copy-output", label: "Copy Output", variant: "ghost", onClick: onCopyOutput },
+    { key: "paste-to-windows", label: "Paste to Windows", variant: "ghost", onClick: onPasteToWindows },
+    { key: "copy-from-windows", label: "Copy from Windows", variant: "ghost", onClick: onCopyFromWindows }
   ];
 
   return (

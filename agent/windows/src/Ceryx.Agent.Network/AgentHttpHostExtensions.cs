@@ -1,5 +1,6 @@
 using Ceryx.Agent.Core;
 using Ceryx.Agent.Capture;
+using Ceryx.Agent.Codex.Clipboard;
 using Ceryx.Agent.Codex.ImageBridge;
 using Ceryx.Agent.Codex.Input;
 using Ceryx.Agent.Codex.SessionLock;
@@ -159,6 +160,21 @@ public static class AgentHttpHostExtensions
             (HttpContext context, PromptSendBody body, ICodexWindowLocator locator, ISessionLockService lockService, IPromptBridgeService promptBridgeService, IAuditLogStore auditLogStore) =>
                 PromptSendHandler(context, body, locator, lockService, promptBridgeService, auditLogStore))
             .RequireAgentAuth(Permission.SendPrompt);
+        app.MapPost(
+            "/api/v1/clipboard/send",
+            (HttpContext context, ClipboardSendBody body, IClipboardService clipboardService, IAuditLogStore auditLogStore) =>
+                ClipboardSendHandler(context, body, clipboardService, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent);
+        app.MapGet(
+            "/api/v1/clipboard/receive",
+            (HttpContext context, IClipboardService clipboardService, IAuditLogStore auditLogStore) =>
+                ClipboardReceiveHandler(context, clipboardService, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent);
+        app.MapPost(
+            "/api/v1/clipboard/clear",
+            (HttpContext context, IClipboardService clipboardService, IAuditLogStore auditLogStore) =>
+                ClipboardClearHandler(context, clipboardService, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent);
 
         app.MapPost(
             "/api/v1/capture/start",
@@ -676,6 +692,88 @@ public static class AgentHttpHostExtensions
             "prompt.send.accepted",
             $"submitted={response.Submitted}");
         return TypedResults.Ok(response);
+    }
+
+    private static async Task<IResult> ClipboardSendHandler(
+        HttpContext context,
+        ClipboardSendBody body,
+        IClipboardService clipboardService,
+        IAuditLogStore auditLogStore)
+    {
+        if (string.IsNullOrWhiteSpace(body.Type))
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_CLIPBOARD_INVALID_REQUEST",
+                Message: "Clipboard type is required.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Use type=text or type=image."));
+        }
+
+        var result = await clipboardService.SetAsync(
+            new ClipboardWriteRequest(
+                Type: body.Type,
+                Content: body.Content ?? string.Empty,
+                MimeType: body.MimeType),
+            context.RequestAborted);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ErrorFromAgentError(context, result.Error ?? new AgentError(
+                Code: "E_CLIPBOARD_INVALID_REQUEST",
+                Message: "Failed to write clipboard payload.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Check clipboard request payload and retry."));
+        }
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "clipboard.send",
+            $"type={result.Value.Type};mimeType={result.Value.MimeType};sizeBytes={result.Value.SizeBytes}");
+        return TypedResults.Ok(new ClipboardSendResponse(
+            Ok: true,
+            Type: result.Value.Type,
+            MimeType: result.Value.MimeType,
+            SizeBytes: result.Value.SizeBytes));
+    }
+
+    private static async Task<IResult> ClipboardReceiveHandler(
+        HttpContext context,
+        IClipboardService clipboardService,
+        IAuditLogStore auditLogStore)
+    {
+        var result = await clipboardService.GetAsync(context.RequestAborted);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ErrorFromAgentError(context, result.Error ?? new AgentError(
+                Code: "E_CLIPBOARD_EMPTY",
+                Message: "Clipboard is empty.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Send clipboard content before receiving."));
+        }
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "clipboard.receive",
+            $"type={result.Value.Type};mimeType={result.Value.MimeType};sizeBytes={result.Value.SizeBytes}");
+        return TypedResults.Ok(new ClipboardReceiveResponse(
+            Ok: true,
+            Type: result.Value.Type,
+            Content: result.Value.Content,
+            MimeType: result.Value.MimeType,
+            SizeBytes: result.Value.SizeBytes));
+    }
+
+    private static async Task<IResult> ClipboardClearHandler(
+        HttpContext context,
+        IClipboardService clipboardService,
+        IAuditLogStore auditLogStore)
+    {
+        await clipboardService.ClearAsync(context.RequestAborted);
+        await WriteAuditAsync(auditLogStore, context, "clipboard.clear", "cleared=true");
+        return TypedResults.Ok(new ClipboardClearResponse(
+            Ok: true,
+            Cleared: true));
     }
 
     private static async Task<IResult> CaptureStartHandler(
@@ -1487,6 +1585,9 @@ public static class AgentHttpHostExtensions
             "E_CAPTURE_DENIED" => StatusCodes.Status403Forbidden,
             "E_CAPTURE_INACTIVE" => StatusCodes.Status409Conflict,
             "E_CAPTURE_FAILED" => StatusCodes.Status500InternalServerError,
+            "E_CLIPBOARD_INVALID_REQUEST" => StatusCodes.Status400BadRequest,
+            "E_CLIPBOARD_TOO_LARGE" => StatusCodes.Status413PayloadTooLarge,
+            "E_CLIPBOARD_EMPTY" => StatusCodes.Status404NotFound,
             "E_INPUT_BLOCKED" => StatusCodes.Status409Conflict,
             "E_UPLOAD_TOO_LARGE" => StatusCodes.Status413PayloadTooLarge,
             "E_RECORDING_BUSY" => StatusCodes.Status409Conflict,

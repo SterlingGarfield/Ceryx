@@ -14,6 +14,9 @@ describe("v0.3 protocol constants", () => {
     expect(CeryxErrorCodes).toContain("E_NOT_PAIRED");
     expect(CeryxErrorCodes).toContain("E_TOKEN_INVALID");
     expect(CeryxErrorCodes).toContain("E_PERMISSION_DENIED");
+    expect(CeryxErrorCodes).toContain("E_CLIPBOARD_INVALID_REQUEST");
+    expect(CeryxErrorCodes).toContain("E_CLIPBOARD_TOO_LARGE");
+    expect(CeryxErrorCodes).toContain("E_CLIPBOARD_EMPTY");
   });
 
   it("includes required control permissions", () => {
@@ -41,6 +44,9 @@ describe("v0.3 protocol constants", () => {
       "POST /api/v1/pairing/desktop-confirm"
     ]);
     expect(ProtectedApiRoutes).toContain("POST /api/v1/prompt/send");
+    expect(ProtectedApiRoutes).toContain("POST /api/v1/clipboard/send");
+    expect(ProtectedApiRoutes).toContain("GET /api/v1/clipboard/receive");
+    expect(ProtectedApiRoutes).toContain("POST /api/v1/clipboard/clear");
   });
 
   it("defines runtime statuses and event names for connection flow", () => {

@@ -51,10 +51,12 @@ import {
   requestProjectFiles,
   requestProjectTasks,
   requestSettings,
+  receiveClipboard,
   sendHotkeyInput,
   sendMouseInput,
   patchAgentSettings,
   sendCaptureSignal,
+  sendClipboard,
   sendPrompt,
   sendScrollInput,
   startCapture,
@@ -1129,6 +1131,55 @@ export function ConsoleRoute() {
       ].join("\n")
     );
     setFeedback("Diff inserted into prompt draft.");
+  }
+
+  async function handlePasteToWindowsClipboard() {
+    if (!navigator.clipboard?.readText) {
+      return { message: "iPad clipboard read is unavailable in this browser context." };
+    }
+
+    const text = await navigator.clipboard.readText();
+    if (!text.trim()) {
+      return { message: "iPad clipboard is empty." };
+    }
+
+    const response = await sendClipboard(activeBaseUrl, {
+      type: "text",
+      content: text,
+      mimeType: "text/plain"
+    });
+    return { message: `Clipboard sent to Windows (${response.sizeBytes} bytes).` };
+  }
+
+  async function handleCopyFromWindowsClipboard() {
+    if (!navigator.clipboard) {
+      return { message: "iPad clipboard access is unavailable in this browser context." };
+    }
+
+    const payload = await receiveClipboard(activeBaseUrl);
+    if (payload.type === "text") {
+      if (!navigator.clipboard.writeText) {
+        return { message: "iPad clipboard write is unavailable in this browser context." };
+      }
+
+      await navigator.clipboard.writeText(payload.content);
+      setDraft(payload.content);
+      return { message: "Windows clipboard copied to iPad and inserted into prompt draft." };
+    }
+
+    if (payload.type === "image") {
+      if (typeof ClipboardItem === "undefined" || !navigator.clipboard.write) {
+        return { message: "Image clipboard is unavailable in this browser." };
+      }
+
+      const imageBlob = decodeBase64ToBlob(payload.content, payload.mimeType);
+      await navigator.clipboard.write([
+        new ClipboardItem({ [payload.mimeType || "image/png"]: imageBlob })
+      ]);
+      return { message: "Windows image clipboard copied to iPad." };
+    }
+
+    return { message: "Clipboard payload type is not supported on this client." };
   }
 
   const sidePanelContent = (
@@ -2690,6 +2741,12 @@ export function ConsoleRoute() {
                 return { message: "Output copied to clipboard." };
               })
             }
+            onPasteToWindows={() =>
+              void runToolbarAction(() => handlePasteToWindowsClipboard())
+            }
+            onCopyFromWindows={() =>
+              void runToolbarAction(() => handleCopyFromWindowsClipboard())
+            }
           />
         </div>
       ) : (
@@ -2937,6 +2994,20 @@ function resolveViewportOverlayMessage({
   }
 
   return statusMessage;
+}
+
+function decodeBase64ToBlob(content: string, mimeType: string): Blob {
+  const markerIndex = content.indexOf("base64,");
+  const payload = markerIndex >= 0 ? content.slice(markerIndex + "base64,".length) : content;
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], {
+    type: mimeType || "image/png"
+  });
 }
 
 function readClientSettingsSnapshot(

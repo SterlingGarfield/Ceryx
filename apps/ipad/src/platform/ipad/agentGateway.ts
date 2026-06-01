@@ -1,6 +1,10 @@
 import {
   AgentClient,
   isTokenInvalidError,
+  type ClipboardClearResponse,
+  type ClipboardReceiveResponse,
+  type ClipboardSendRequest,
+  type ClipboardSendResponse,
   type AgentSettingsPatch,
   type AgentStatus,
   type CaptureFrameResult,
@@ -190,6 +194,21 @@ export async function sendPrompt(
   request: { prompt: string; submit: boolean }
 ): Promise<PromptSendResponse> {
   return createClient(baseUrl).sendPrompt(request);
+}
+
+export async function sendClipboard(
+  baseUrl: string,
+  request: ClipboardSendRequest
+): Promise<ClipboardSendResponse> {
+  return createClient(baseUrl).sendClipboard(request);
+}
+
+export async function receiveClipboard(baseUrl: string): Promise<ClipboardReceiveResponse> {
+  return createClient(baseUrl).receiveClipboard();
+}
+
+export async function clearClipboard(baseUrl: string): Promise<ClipboardClearResponse> {
+  return createClient(baseUrl).clearClipboard();
 }
 
 export async function requestDiff(baseUrl: string): Promise<ProjectDiffResponse> {

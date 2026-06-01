@@ -216,7 +216,9 @@ public sealed class PerformanceMeasurementTests :
                                 JsonSerializer.Serialize(new CaptureSignalBody(
                                     SessionId: "perf-session",
                                     Type: "performance",
-                                    Payload: "{\"cpuUsagePercent\":35,\"networkJitterMs\":12,\"hasActiveViewer\":true}")),
+                                    Payload: "{\"cpuUsagePercent\":35,\"networkJitterMs\":12,\"hasActiveViewer\":true}",
+                                    Sdp: null,
+                                    Candidate: null)),
                                 Encoding.UTF8,
                                 "application/json"),
                             cancellationToken);

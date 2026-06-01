@@ -70,6 +70,35 @@ export interface PromptSendResponse {
   submitted: boolean;
 }
 
+export const ClipboardPayloadTypes = ["text", "image"] as const;
+export type ClipboardPayloadType = (typeof ClipboardPayloadTypes)[number];
+
+export interface ClipboardSendRequest {
+  type: ClipboardPayloadType | string;
+  content: string;
+  mimeType: string;
+}
+
+export interface ClipboardSendResponse {
+  ok: boolean;
+  type: ClipboardPayloadType | string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+export interface ClipboardReceiveResponse {
+  ok: boolean;
+  type: ClipboardPayloadType | string;
+  content: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+export interface ClipboardClearResponse {
+  ok: boolean;
+  cleared: boolean;
+}
+
 export interface CaptureStartRequest {
   mode: CaptureMode | string;
   target: "codex_window" | "full_desktop" | string;

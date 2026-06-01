@@ -78,6 +78,32 @@ public sealed record PromptSendResponse(
     [property: JsonPropertyName("submitted")] bool Submitted
 );
 
+public sealed record ClipboardSendBody(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("mimeType")] string MimeType
+);
+
+public sealed record ClipboardSendResponse(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("mimeType")] string MimeType,
+    [property: JsonPropertyName("sizeBytes")] int SizeBytes
+);
+
+public sealed record ClipboardReceiveResponse(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("mimeType")] string MimeType,
+    [property: JsonPropertyName("sizeBytes")] int SizeBytes
+);
+
+public sealed record ClipboardClearResponse(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("cleared")] bool Cleared
+);
+
 public sealed record ProjectDiffResponse(
     [property: JsonPropertyName("ok")] bool Ok,
     [property: JsonPropertyName("status")] string Status,

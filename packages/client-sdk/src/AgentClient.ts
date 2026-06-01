@@ -1,5 +1,9 @@
 import type {
   AgentManagementResponse,
+  ClipboardClearResponse,
+  ClipboardReceiveResponse,
+  ClipboardSendRequest,
+  ClipboardSendResponse,
   AgentSettingsPatch,
   AgentPathsResponse,
   AgentStatus,
@@ -240,6 +244,27 @@ export class AgentClient {
       auth: true,
       method: "POST",
       body: request
+    });
+  }
+
+  async sendClipboard(request: ClipboardSendRequest): Promise<ClipboardSendResponse> {
+    return this.request<ClipboardSendResponse>("/api/v1/clipboard/send", {
+      auth: true,
+      method: "POST",
+      body: request
+    });
+  }
+
+  async receiveClipboard(): Promise<ClipboardReceiveResponse> {
+    return this.request<ClipboardReceiveResponse>("/api/v1/clipboard/receive", {
+      auth: true
+    });
+  }
+
+  async clearClipboard(): Promise<ClipboardClearResponse> {
+    return this.request<ClipboardClearResponse>("/api/v1/clipboard/clear", {
+      auth: true,
+      method: "POST"
     });
   }
 

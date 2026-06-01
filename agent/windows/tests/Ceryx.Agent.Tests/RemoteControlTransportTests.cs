@@ -7,6 +7,7 @@ using Ceryx.Agent.Core;
 using Ceryx.Agent.Media;
 using Ceryx.Agent.Security.Pairing;
 using Ceryx.Agent.Storage;
+using Ceryx.Agent.Storage.Audit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,6 +140,97 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
     }
 
     [Fact]
+    public async Task ClipboardRoutes_SendReceiveAndClearPayload()
+    {
+        var client = await CreateClientAsync(Permission.ManageAgent);
+        var auditStore = _factory.Services.GetRequiredService<IAuditLogStore>();
+        var sendBefore = (await auditStore.QueryAsync(new AuditLogQuery(Page: 1, PageSize: 1, Action: "clipboard.send"))).Total;
+        var receiveBefore = (await auditStore.QueryAsync(new AuditLogQuery(Page: 1, PageSize: 1, Action: "clipboard.receive"))).Total;
+        var clearBefore = (await auditStore.QueryAsync(new AuditLogQuery(Page: 1, PageSize: 1, Action: "clipboard.clear"))).Total;
+
+        var send = await client.PostAsync(
+            "/api/v1/clipboard/send",
+            CreateJsonContent(new ClipboardSendBody(
+                Type: "text",
+                Content: "sync me",
+                MimeType: "text/plain")));
+        Assert.Equal(HttpStatusCode.OK, send.StatusCode);
+
+        var sendRoot = await ReadJsonAsync(send);
+        Assert.True(sendRoot.GetProperty("ok").GetBoolean());
+        Assert.Equal("text", sendRoot.GetProperty("type").GetString());
+        Assert.Equal("text/plain", sendRoot.GetProperty("mimeType").GetString());
+        Assert.True(sendRoot.GetProperty("sizeBytes").GetInt32() > 0);
+
+        var receive = await client.GetAsync("/api/v1/clipboard/receive");
+        Assert.Equal(HttpStatusCode.OK, receive.StatusCode);
+
+        var receiveRoot = await ReadJsonAsync(receive);
+        Assert.True(receiveRoot.GetProperty("ok").GetBoolean());
+        Assert.Equal("text", receiveRoot.GetProperty("type").GetString());
+        Assert.Equal("sync me", receiveRoot.GetProperty("content").GetString());
+
+        var clear = await client.PostAsync("/api/v1/clipboard/clear", content: null);
+        Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
+        var clearRoot = await ReadJsonAsync(clear);
+        Assert.True(clearRoot.GetProperty("ok").GetBoolean());
+        Assert.True(clearRoot.GetProperty("cleared").GetBoolean());
+
+        var empty = await client.GetAsync("/api/v1/clipboard/receive");
+        Assert.Equal(HttpStatusCode.NotFound, empty.StatusCode);
+        AssertErrorCode(await ReadJsonAsync(empty), "E_CLIPBOARD_EMPTY");
+
+        var sendAfter = (await auditStore.QueryAsync(new AuditLogQuery(Page: 1, PageSize: 1, Action: "clipboard.send"))).Total;
+        var receiveAfter = (await auditStore.QueryAsync(new AuditLogQuery(Page: 1, PageSize: 1, Action: "clipboard.receive"))).Total;
+        var clearAfter = (await auditStore.QueryAsync(new AuditLogQuery(Page: 1, PageSize: 1, Action: "clipboard.clear"))).Total;
+        Assert.True(sendAfter >= sendBefore + 1);
+        Assert.True(receiveAfter >= receiveBefore + 1);
+        Assert.True(clearAfter >= clearBefore + 1);
+    }
+
+    [Fact]
+    public async Task ClipboardRoutes_SendAndReceiveImagePayload()
+    {
+        var client = await CreateClientAsync(Permission.ManageAgent);
+        var imageContent = Convert.ToBase64String(FakeWindowImageCapture.PngBytes);
+
+        var send = await client.PostAsync(
+            "/api/v1/clipboard/send",
+            CreateJsonContent(new ClipboardSendBody(
+                Type: "image",
+                Content: imageContent,
+                MimeType: "image/png")));
+
+        Assert.Equal(HttpStatusCode.OK, send.StatusCode);
+
+        var receive = await client.GetAsync("/api/v1/clipboard/receive");
+        Assert.Equal(HttpStatusCode.OK, receive.StatusCode);
+
+        var receiveRoot = await ReadJsonAsync(receive);
+        Assert.True(receiveRoot.GetProperty("ok").GetBoolean());
+        Assert.Equal("image", receiveRoot.GetProperty("type").GetString());
+        Assert.Equal("image/png", receiveRoot.GetProperty("mimeType").GetString());
+        Assert.Equal(imageContent, receiveRoot.GetProperty("content").GetString());
+        Assert.Equal(FakeWindowImageCapture.PngBytes.Length, receiveRoot.GetProperty("sizeBytes").GetInt32());
+    }
+
+    [Fact]
+    public async Task ClipboardSendRoute_RejectsPayloadAboveTenMegabytes()
+    {
+        var client = await CreateClientAsync(Permission.ManageAgent);
+        var oversizedContent = new string('a', (10 * 1024 * 1024) + 1);
+        var response = await client.PostAsync(
+            "/api/v1/clipboard/send",
+            CreateJsonContent(new ClipboardSendBody(
+                Type: "text",
+                Content: oversizedContent,
+                MimeType: "text/plain")));
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        AssertErrorCode(await ReadJsonAsync(response), "E_CLIPBOARD_TOO_LARGE");
+    }
+
+    [Fact]
     public async Task CaptureRoutes_StartStateStopAndRejectUnavailableWindow()
     {
         var client = await CreateClientAsync(Permission.ViewWindow);
@@ -155,7 +247,12 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
 
         var signal = await client.PostAsync(
             "/api/v1/capture/webrtc/signal",
-            CreateJsonContent(new CaptureSignalBody("sess-1", "offer", "{}")));
+            CreateJsonContent(new CaptureSignalBody(
+                SessionId: "sess-1",
+                Type: "offer",
+                Payload: null,
+                Sdp: "{}",
+                Candidate: null)));
         Assert.Equal(HttpStatusCode.OK, signal.StatusCode);
 
         var state = await client.GetAsync("/api/v1/capture/state");

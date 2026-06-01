@@ -17,7 +17,8 @@ public class AgentStatusTests
             HttpPort: 41527,
             SupportsWebRTC: true,
             SupportsDesktopClient: true,
-            CodexStatus: CodexWindowStatus.NotFound.ToWireValue());
+            CodexStatus: CodexWindowStatus.NotFound.ToWireValue(),
+            CaptureBackend: "gdi");
 
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(response));
         var root = document.RootElement;
