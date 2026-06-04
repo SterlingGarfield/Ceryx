@@ -4,6 +4,8 @@ import {
   normalizePreviewRefreshProfile,
   type CaptureFrameResult,
   type CaptureMode,
+  type CaptureStateResponse,
+  type CodexWindowSnapshot,
   type PreviewRefreshProfile
 } from "@ceryx/client-sdk";
 import type {
@@ -12,7 +14,9 @@ import type {
   AgentSettingsPatch,
   AgentSettingsState,
   ClientSettingsState,
+  FileTransferEntry,
   LogsQuery,
+  RecordingEntryResponse,
   ProjectFileEntry,
   ProjectDiffFileEntry,
   ProjectDiffFileResponse,
@@ -21,42 +25,71 @@ import type {
   ProjectTestRequestState
 } from "@ceryx/client-sdk";
 import {
+  defaultShortcutDefinitions,
+  createDefaultCustomGestureProfile,
+  defaultGestureDefinitions,
+  defaultGestureProfiles,
+  gestureActionLabel,
+  gestureActionOptions,
+  gestureBindingsForProfile,
+  normalizeGestureProfile,
+  normalizeGestureBindings,
+  resolveGestureProfile,
+  type GestureActionId,
+  type GestureBindingId,
+  type GestureMapping,
+  type GestureMappingParams,
+  type GestureProfile,
+  type ShortcutProfile
+} from "@ceryx/protocol";
+import {
   CodexToolbar,
+  CodexWindowPipPreview,
+  CodexWindowSwitcher,
   PromptComposer,
+  RecordingPanel,
   RemoteViewport,
   defaultPermissionsForClient,
   hasPermission,
   resolveProtocolError,
+  useGestureEngine,
   useConnectionStore,
   usePromptStore,
   useRemoteSessionStore,
   useViewportPreview,
-  useWebRtcViewport
+  useWebRtcViewport,
+  normalizeShortcutBindings,
+  resolveShortcutProfile,
+  type RecordingMode
 } from "@ceryx/feature-remote-control";
 import { Button, Panel, StatusChip, TextArea } from "@ceryx/ui";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   clearNotifications,
+  deleteAgentFile,
   getCaptureFrame,
   getCaptureState,
   getCodexWindow,
+  listCodexWindows,
+  downloadAgentFile,
   markNotificationRead,
   probeAgent,
+  requestAgentFiles,
   requestNotifications,
   refreshCodexWindow,
+  selectCodexWindow,
   requestDiffFile,
   requestDiffFiles,
   requestLogs,
   requestProjectFiles,
   requestProjectTasks,
   requestSettings,
-  receiveClipboard,
+  requestRecordings,
   sendHotkeyInput,
   sendMouseInput,
   patchAgentSettings,
   sendCaptureSignal,
-  sendClipboard,
   sendPrompt,
   sendScrollInput,
   startCapture,
@@ -64,8 +97,16 @@ import {
   stopCapture,
   stopRecordingCapture,
   takeScreenshot,
+  downloadRecording,
+  uploadAgentFile,
   uploadImageAsset
 } from "../platform/ipad/agentGateway";
+import {
+  clipboardPayloadSignature,
+  copyWindowsClipboardToLocal,
+  readLocalClipboardPayload,
+  sendLocalClipboardPayloadToWindows
+} from "../platform/ipad/clipboardBridge";
 import {
   normalizeAgentBaseUrl,
   resolveDefaultAgentBaseUrl
@@ -96,6 +137,7 @@ const ipadSettingsGroups = [
     group: "Workspace",
     sections: [
       { id: "general", label: "General" },
+      { id: "gestures", label: "Gestures" },
       { id: "shortcuts", label: "Shortcuts" },
       { id: "about", label: "About" }
     ]
@@ -113,22 +155,6 @@ const ipadSettingsGroups = [
 ] as const;
 
 type IpadSettingsSectionId = (typeof ipadSettingsGroups)[number]["sections"][number]["id"];
-
-type TouchPoint = {
-  clientX: number;
-  clientY: number;
-};
-
-type GestureState = {
-  startedAt: number;
-  startTouches: number;
-  startCentroid: TouchPoint;
-  latestCentroid: TouchPoint;
-  startDistance: number;
-  latestDistance: number;
-  moved: boolean;
-  longPressTriggered: boolean;
-};
 
 export function ConsoleRoute() {
   const navigate = useNavigate();
@@ -148,13 +174,19 @@ export function ConsoleRoute() {
   const remoteSession = useRemoteSessionStore();
 
   const gestureSurfaceRef = useRef<HTMLDivElement | null>(null);
-  const gestureStateRef = useRef<GestureState | null>(null);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingPreviewUrlRef = useRef<string | null>(null);
 
   const [codexTitle, setCodexTitle] = useState("Codex window not loaded");
   const [codexStatus, setCodexStatus] = useState("unknown");
   const [viewportMessage, setViewportMessage] = useState("Refreshing iPad control session...");
   const [recordingActive, setRecordingActive] = useState(false);
+  const [recordingAudioActive, setRecordingAudioActive] = useState(false);
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>("screen");
+  const [recordings, setRecordings] = useState<RecordingEntryResponse[]>([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(false);
+  const [recordingsError, setRecordingsError] = useState("");
+  const [selectedRecordingFileName, setSelectedRecordingFileName] = useState<string | null>(null);
+  const [selectedRecordingUrl, setSelectedRecordingUrl] = useState<string | null>(null);
   const [toolbarBusy, setToolbarBusy] = useState(false);
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const [feedback, setFeedback] = useState("");
@@ -201,12 +233,24 @@ export function ConsoleRoute() {
   const [agentSettingsDraft, setAgentSettingsDraft] = useState<AgentSettingsState | null>(null);
   const [clientSettingsSource, setClientSettingsSource] = useState<ClientSettingsState | null>(null);
   const [clientSettingsDraft, setClientSettingsDraft] = useState<ClientSettingsState | null>(null);
+  const [codexWindows, setCodexWindows] = useState<CodexWindowSnapshot[]>([]);
+  const [codexWindowsLoading, setCodexWindowsLoading] = useState(false);
+  const [codexWindowsError, setCodexWindowsError] = useState("");
+  const [windowPreviewUrls, setWindowPreviewUrls] = useState<Record<string, string>>({});
+  const [pipDismissedWindowIds, setPipDismissedWindowIds] = useState<string[]>([]);
   const [filesWorkspaceOpen, setFilesWorkspaceOpen] = useState(false);
   const [filesQuery, setFilesQuery] = useState("");
   const [projectFiles, setProjectFiles] = useState<ProjectFileEntry[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState("");
   const [filesPermissionDenied, setFilesPermissionDenied] = useState(false);
+  const [transferFile, setTransferFile] = useState<File | null>(null);
+  const [transferTargetPath, setTransferTargetPath] = useState("uploads");
+  const [transferUploading, setTransferUploading] = useState(false);
+  const [agentFiles, setAgentFiles] = useState<FileTransferEntry[]>([]);
+  const [agentFilesLoading, setAgentFilesLoading] = useState(false);
+  const [agentFilesError, setAgentFilesError] = useState("");
+  const [agentFilesPermissionDenied, setAgentFilesPermissionDenied] = useState(false);
   const [tasksWorkspaceOpen, setTasksWorkspaceOpen] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState("");
@@ -222,6 +266,8 @@ export function ConsoleRoute() {
   const [notificationsUnread, setNotificationsUnread] = useState(0);
   const [forcePollingFallback, setForcePollingFallback] = useState(false);
   const webRtcVideoRef = useRef<HTMLVideoElement | null>(null);
+  const clipboardAutoSyncSignatureRef = useRef<string | null>(null);
+  const clipboardAutoSyncErrorRef = useRef("");
 
   const activeBaseUrl = normalizeAgentBaseUrl(currentDevice?.baseUrl) ?? fallbackBaseUrl;
   const deviceName = currentDevice?.deviceName ?? "Windows Agent";
@@ -258,9 +304,18 @@ export function ConsoleRoute() {
 
   useEffect(() => {
     return () => {
-      clearLongPressTimer(longPressTimerRef);
+      if (recordingPreviewUrlRef.current) {
+        URL.revokeObjectURL(recordingPreviewUrlRef.current);
+        recordingPreviewUrlRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(windowPreviewUrls).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [windowPreviewUrls]);
 
   function resolveErrorMessage(error: unknown, fallback: string): string {
     return resolveProtocolError(error, fallback).message;
@@ -297,7 +352,39 @@ export function ConsoleRoute() {
     return resolved.message;
   }
 
+  function resolveActiveWindowId(windowList: CodexWindowSnapshot[] = codexWindows): string | null {
+    const windows = Array.isArray(windowList) ? windowList : [];
+    const focusedWindow = windows.find((window) => window.status === "focused");
+    const windowId = remoteSession.captureState.windowId?.trim() || focusedWindow?.windowId?.trim() || windows[0]?.windowId?.trim();
+    return windowId && windowId.length > 0 ? windowId : null;
+  }
+
+  async function captureWindowPreviews(windowList: CodexWindowSnapshot[]): Promise<Record<string, string>> {
+    const previewEntries = await Promise.allSettled(
+      windowList
+        .map((window) => window.windowId?.trim())
+        .filter((windowId): windowId is string => Boolean(windowId))
+        .map(async (windowId) => {
+          const frame = await getCaptureFrame(activeBaseUrl, windowId);
+          return [windowId, URL.createObjectURL(frame.blob)] as const;
+        })
+    );
+
+    const nextPreviewUrls: Record<string, string> = {};
+    for (const entry of previewEntries) {
+      if (entry.status === "fulfilled") {
+        const [windowId, previewUrl] = entry.value;
+        nextPreviewUrls[windowId] = previewUrl;
+      }
+    }
+
+    return nextPreviewUrls;
+  }
+
   async function refreshConsole() {
+    setCodexWindowsLoading(true);
+    setCodexWindowsError("");
+
     const probe = await probeAgent(activeBaseUrl);
     const canControl = probe.reachable && probe.runtimeStatus !== "unpaired";
     const permissions = canControl ? defaultPermissionsForClient("ipad") : [];
@@ -317,19 +404,34 @@ export function ConsoleRoute() {
       setCodexStatus(probe.reachable ? "unpaired" : probe.codexStatus);
       setCodexTitle(probe.reachable ? "Pairing required" : "Agent offline");
       setViewportMessage(probe.message);
+      setCodexWindows([]);
+      setWindowPreviewUrls({});
+      setPipDismissedWindowIds([]);
+      setCodexWindowsLoading(false);
       return;
     }
 
     try {
-      const [windowSnapshot, captureState] = await Promise.all([
+      const [windowSnapshot, captureState, windowList] = await Promise.all([
         getCodexWindow(activeBaseUrl),
-        getCaptureState(activeBaseUrl)
+        getCaptureState(activeBaseUrl),
+        listCodexWindows(activeBaseUrl)
       ]);
       setCodexTitle(windowSnapshot.title ?? "Codex");
       setCodexStatus(windowSnapshot.status);
       remoteSession.setCaptureState(captureState);
       remoteSession.setPermissions(permissions);
       remoteSession.markActive();
+      setCodexWindows(windowList.windows);
+      setPipDismissedWindowIds((current) =>
+        current.filter((windowId) => windowList.windows.some((window) => window.windowId === windowId))
+      );
+      if (captureState.active) {
+        setWindowPreviewUrls(await captureWindowPreviews(windowList.windows));
+      } else {
+        setWindowPreviewUrls({});
+      }
+      setCodexWindowsError("");
       setViewportMessage(
         captureState.active
           ? "Waiting for real frame..."
@@ -340,7 +442,13 @@ export function ConsoleRoute() {
       remoteSession.setCaptureState(idleCaptureState);
       const message = applyConsoleError(error, "Unable to fetch Codex window or capture state.");
       remoteSession.setError(message);
+      setCodexWindows([]);
+      setWindowPreviewUrls({});
+      setPipDismissedWindowIds([]);
+      setCodexWindowsError(message);
       setViewportMessage(message);
+    } finally {
+      setCodexWindowsLoading(false);
     }
   }
 
@@ -352,6 +460,30 @@ export function ConsoleRoute() {
     () => remoteSession.status !== "idle" && remoteSession.status !== "error",
     [remoteSession.status]
   );
+
+  useEffect(() => {
+    if (!connected) {
+      setRecordingActive(false);
+      setRecordingAudioActive(false);
+      setRecordingsLoading(false);
+      setRecordings([]);
+      setRecordingsError("");
+      clearRecordingPreview();
+      return;
+    }
+
+    void loadRecordings();
+  }, [activeBaseUrl, connected]);
+
+  const activeGestureProfileId =
+    clientSettingsDraft?.activeGestureProfile ??
+    clientSettingsSource?.activeGestureProfile ??
+    "default";
+  const gestureProfile = resolveGestureProfile(
+    activeGestureProfileId,
+    clientSettingsDraft?.customGestures ?? clientSettingsSource?.customGestures ?? createDefaultCustomGestureProfile()
+  );
+  const gestureBindings = gestureBindingsForProfile(gestureProfile);
   const previewRefreshProfile = normalizePreviewRefreshProfile(
     clientSettingsDraft?.previewRefreshProfile ??
       clientSettingsSource?.previewRefreshProfile ??
@@ -368,6 +500,9 @@ export function ConsoleRoute() {
     clientSettingsSource?.viewportTransport === "polling"
       ? "polling"
       : defaultViewportTransport;
+  const clipboardAutoSyncEnabled = connected && Boolean(
+    clientSettingsDraft?.clipboardAutoSync ?? clientSettingsSource?.clipboardAutoSync ?? false
+  );
   const webRtcViewport = useWebRtcViewport({
     enabled: connected && remoteSession.captureState.active && viewportTransport === "webrtc" && !forcePollingFallback,
     sessionKey: `${sessionDeviceId}:webrtc:${activeBaseUrl}`,
@@ -403,6 +538,29 @@ export function ConsoleRoute() {
     previewError: viewportPreview.lastError,
     statusMessage: viewportMessage
   });
+  const activeWindowId = resolveActiveWindowId();
+  const inputLockPreference =
+    clientSettingsDraft?.lockLocalInputWhenCapturing ??
+    clientSettingsSource?.lockLocalInputWhenCapturing ??
+    true;
+  const inputLockActive =
+    connected && remoteSession.captureState.active && Boolean(activeWindowId) && inputLockPreference;
+  function updateInputLockPreference(nextEnabled: boolean) {
+    setClientSettingsDraft((current) =>
+      current ? { ...current, lockLocalInputWhenCapturing: nextEnabled } : current
+    );
+  }
+  const previewWindows = Array.isArray(codexWindows) ? codexWindows : [];
+  const pipWindow = previewWindows.find((window) => {
+    const windowId = window.windowId?.trim();
+    if (!windowId) {
+      return false;
+    }
+
+    return windowId !== activeWindowId && !pipDismissedWindowIds.includes(windowId);
+  });
+  const pipWindowId = pipWindow?.windowId?.trim() ?? null;
+  const pipPreviewUrl = pipWindowId ? windowPreviewUrls[pipWindowId] : null;
 
   useEffect(() => {
     if (!remoteSession.captureState.active) {
@@ -415,6 +573,66 @@ export function ConsoleRoute() {
       setForcePollingFallback(false);
     }
   }, [viewportTransport]);
+
+  useEffect(() => {
+    if (!clipboardAutoSyncEnabled) {
+      clipboardAutoSyncSignatureRef.current = null;
+      clipboardAutoSyncErrorRef.current = "";
+      return;
+    }
+
+    clipboardAutoSyncSignatureRef.current = null;
+    clipboardAutoSyncErrorRef.current = "";
+
+    let cancelled = false;
+
+    async function pollClipboard() {
+      let currentSignature: string | null = null;
+      try {
+        const payload = await readLocalClipboardPayload();
+        if (cancelled || !payload) {
+          return;
+        }
+
+        currentSignature = clipboardPayloadSignature(payload);
+        if (currentSignature === clipboardAutoSyncSignatureRef.current) {
+          return;
+        }
+
+        await sendLocalClipboardPayloadToWindows(activeBaseUrl, payload);
+        if (cancelled) {
+          return;
+        }
+
+        clipboardAutoSyncSignatureRef.current = currentSignature;
+        clipboardAutoSyncErrorRef.current = "";
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        if (currentSignature) {
+          clipboardAutoSyncSignatureRef.current = currentSignature;
+        }
+
+        const message = resolveErrorMessage(error, "Failed to auto-sync clipboard.");
+        if (message !== clipboardAutoSyncErrorRef.current) {
+          clipboardAutoSyncErrorRef.current = message;
+          setFeedback(`Clipboard auto-sync paused: ${message}`);
+        }
+      }
+    }
+
+    void pollClipboard();
+    const intervalId = window.setInterval(() => {
+      void pollClipboard();
+    }, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeBaseUrl, clipboardAutoSyncEnabled]);
 
   useEffect(() => {
     const video = webRtcVideoRef.current;
@@ -466,6 +684,24 @@ export function ConsoleRoute() {
     }
   }
 
+  async function selectWindow(windowId: string) {
+    await runToolbarAction(async () => {
+      const snapshot = await selectCodexWindow(activeBaseUrl, windowId);
+      setCodexTitle(snapshot.title ?? "Codex");
+      setCodexStatus(snapshot.status);
+
+      if (remoteSession.captureState.active) {
+        const captureState = await startCapture(activeBaseUrl, previewCaptureMode, windowId);
+        remoteSession.setCaptureState(captureState);
+        setViewportMessage("Waiting for real frame...");
+      } else {
+        setViewportMessage("Window selected. Start capture to load a live frame.");
+      }
+
+      return { message: `Switched to ${snapshot.title ?? windowId}.` };
+    });
+  }
+
   async function runGestureAction(action: () => Promise<unknown>, successMessage: string) {
     if (!canControlInput) {
       setFeedback("Input control permission denied for this device.");
@@ -475,7 +711,167 @@ export function ConsoleRoute() {
     await runToolbarAction(action, successMessage);
   }
 
+  function updateGestureProfile(profileId: string) {
+    const nextProfileId = normalizeGestureProfileId(profileId);
+    setClientSettingsDraft((current) =>
+      current
+        ? {
+            ...current,
+            activeGestureProfile: nextProfileId,
+            customGestures:
+              nextProfileId === "custom"
+                ? current.customGestures
+                  ? normalizeGestureProfile(current.customGestures)
+                  : createDefaultCustomGestureProfile(
+                      resolveGestureProfile(
+                        current.activeGestureProfile ?? activeGestureProfileId,
+                        createDefaultCustomGestureProfile(defaultGestureProfiles.default)
+                      )
+                    )
+                : current.customGestures ?? createDefaultCustomGestureProfile(defaultGestureProfiles.default)
+          }
+        : current
+    );
+  }
+
+  function resetGestureProfile() {
+    setClientSettingsDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        activeGestureProfile: "default",
+        customGestures: createDefaultCustomGestureProfile(defaultGestureProfiles.default)
+      };
+    });
+  }
+
+  function updateGestureBinding(bindingId: GestureBindingId, mapping: GestureMapping) {
+    setClientSettingsDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const resolvedProfile = resolveGestureProfile(
+        current.activeGestureProfile ?? activeGestureProfileId,
+        current.customGestures ?? createDefaultCustomGestureProfile(defaultGestureProfiles.default)
+      );
+      const nextBindings = normalizeGestureBindings(
+        {
+          ...resolvedProfile.bindings,
+          [bindingId]: mapping
+        } as Partial<Record<GestureBindingId, GestureMapping>>,
+        resolvedProfile.bindings
+      );
+
+      return {
+        ...current,
+        activeGestureProfile: "custom",
+        customGestures: {
+          id: "custom",
+          name: "Custom",
+          bindings: nextBindings
+        }
+      };
+    });
+  }
+
+  async function sendGestureMouseMove(point: { x: number; y: number }) {
+    if (!canControlInput) {
+      return;
+    }
+
+    try {
+      await sendMouseInput(activeBaseUrl, {
+        x: point.x,
+        y: point.y,
+        button: "left",
+        action: "move"
+      });
+    } catch (error) {
+      setFeedback(resolveErrorMessage(error, "Gesture mouse move failed."));
+    }
+  }
+
+  const gestureEngine = useGestureEngine({
+    enabled: canControlInput,
+    profile: gestureProfile,
+    captureState: remoteSession.captureState,
+    surfaceRef: gestureSurfaceRef,
+    callbacks: {
+      mouseMove: async (point) => {
+        await sendGestureMouseMove(point);
+      },
+      leftClick: async (point) =>
+        runGestureAction(
+          () =>
+            sendMouseInput(activeBaseUrl, {
+              x: point.x,
+              y: point.y,
+              button: "left",
+              action: "click"
+            }),
+          "Single tap mapped to left click."
+        ),
+      rightClick: async (point) =>
+        runGestureAction(
+          () =>
+            sendMouseInput(activeBaseUrl, {
+              x: point.x,
+              y: point.y,
+              button: "right",
+              action: "click"
+            }),
+          "Two-finger tap mapped to right click."
+        ),
+      pressHold: async (point) =>
+        runGestureAction(async () => {
+          await sendMouseInput(activeBaseUrl, {
+            x: point.x,
+            y: point.y,
+            button: "left",
+            action: "down"
+          });
+          await waitMs(320);
+          return sendMouseInput(activeBaseUrl, {
+            x: point.x,
+            y: point.y,
+            button: "left",
+            action: "up"
+          });
+        }, "Long press mapped to press-and-hold."),
+      scroll: async (request) =>
+        runGestureAction(
+          () => sendScrollInput(activeBaseUrl, request),
+          "Two-finger scroll mapped to input scroll."
+        ),
+      hotkey: async (request) =>
+        runGestureAction(
+          () => sendHotkeyInput(activeBaseUrl, request),
+          request.keys.includes("plus")
+            ? "Pinch mapped to zoom in."
+            : request.keys.includes("minus")
+              ? "Pinch mapped to zoom out."
+              : `Hotkey sent: ${request.keys.join("+")}.`
+        ),
+      toggleToolbar: async () => {
+        setToolbarVisible((current) => {
+          const next = !current;
+          setFeedback(next ? "Toolbar shown via three-finger tap." : "Toolbar hidden via three-finger tap.");
+          return next;
+        });
+      }
+    }
+  });
+
   async function handleSendPrompt(submit: boolean) {
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     let historyId = "";
 
     try {
@@ -505,18 +901,29 @@ export function ConsoleRoute() {
       if (recordingActive) {
         const response = await stopRecordingCapture(activeBaseUrl);
         setRecordingActive(false);
+        setRecordingAudioActive(false);
+        await loadRecordings(response.fileName);
         return response;
       }
 
       const confirmed = typeof window === "undefined"
         ? true
-        : window.confirm("Start screen recording for current remote session?");
+        : window.confirm(
+            recordingMode === "screen-audio"
+              ? "Start screen recording with system audio for current remote session?"
+              : "Start screen recording for current remote session?"
+          );
       if (!confirmed) {
         throw new Error("Recording start canceled.");
       }
 
-      const response = await startRecordingCapture(activeBaseUrl, true);
+      const response = await startRecordingCapture(activeBaseUrl, {
+        confirmHighRisk: true,
+        includeAudio: recordingMode === "screen-audio",
+        audioSource: recordingMode === "screen-audio" ? "system" : undefined
+      });
       setRecordingActive(true);
+      setRecordingAudioActive(response.audioEnabled);
       return response;
     });
   }
@@ -526,6 +933,8 @@ export function ConsoleRoute() {
       if (recordingActive) {
         const response = await stopRecordingCapture(activeBaseUrl);
         setRecordingActive(false);
+        setRecordingAudioActive(false);
+        await loadRecordings(response.fileName);
         return response;
       }
 
@@ -533,215 +942,88 @@ export function ConsoleRoute() {
     }, "Stopped active session control.");
   }
 
-  function startGestureTracking(points: TouchPoint[]) {
-    const centroid = centroidOf(points);
-    const distance = points.length >= 2 ? distanceBetween(points[0], points[1]) : 0;
-    gestureStateRef.current = {
-      startedAt: Date.now(),
-      startTouches: points.length,
-      startCentroid: centroid,
-      latestCentroid: centroid,
-      startDistance: distance,
-      latestDistance: distance,
-      moved: false,
-      longPressTriggered: false
-    };
-  }
+  async function loadRecordings(preferredFileName?: string | null) {
+    setRecordingsLoading(true);
+    setRecordingsError("");
 
-  function handleGestureTouchStart(event: React.TouchEvent<HTMLDivElement>) {
-    const points = readTouchPoints(event.touches);
-    if (points.length === 0) {
-      return;
-    }
+    try {
+      const response = await requestRecordings(activeBaseUrl, 100);
+      setRecordings(response.items);
 
-    if (points.length >= 2) {
-      event.preventDefault();
-    }
-
-    clearLongPressTimer(longPressTimerRef);
-    startGestureTracking(points);
-
-    if (points.length === 1) {
-      longPressTimerRef.current = setTimeout(() => {
-        const state = gestureStateRef.current;
-        if (!state || state.startTouches !== 1 || state.moved || state.longPressTriggered) {
-          return;
-        }
-
-        state.longPressTriggered = true;
-        void handleLongPressGesture(state.startCentroid);
-      }, 550);
-    }
-  }
-
-  function handleGestureTouchMove(event: React.TouchEvent<HTMLDivElement>) {
-    const state = gestureStateRef.current;
-    if (!state) {
-      return;
-    }
-
-    const points = readTouchPoints(event.touches);
-    if (points.length === 0) {
-      return;
-    }
-
-    if (points.length >= 2) {
-      event.preventDefault();
-    }
-
-    const centroid = centroidOf(points);
-    state.latestCentroid = centroid;
-    if (
-      Math.abs(centroid.clientX - state.startCentroid.clientX) > 10 ||
-      Math.abs(centroid.clientY - state.startCentroid.clientY) > 10
-    ) {
-      state.moved = true;
-      clearLongPressTimer(longPressTimerRef);
-    }
-
-    if (points.length >= 2) {
-      state.latestDistance = distanceBetween(points[0], points[1]);
-    }
-  }
-
-  function handleGestureTouchEnd(event: React.TouchEvent<HTMLDivElement>) {
-    if (event.changedTouches.length >= 2) {
-      event.preventDefault();
-    }
-
-    clearLongPressTimer(longPressTimerRef);
-    const state = gestureStateRef.current;
-    gestureStateRef.current = null;
-    if (!state) {
-      return;
-    }
-
-    const duration = Date.now() - state.startedAt;
-    if (state.startTouches === 3 && duration <= 500) {
-      setToolbarVisible((current) => {
-        const next = !current;
-        setFeedback(next ? "Toolbar shown via three-finger tap." : "Toolbar hidden via three-finger tap.");
-        return next;
-      });
-      return;
-    }
-
-    if (state.startTouches === 1) {
-      if (!state.moved && !state.longPressTriggered && duration <= 350) {
-        void handleSingleTapGesture(state.startCentroid);
+      const candidate =
+        preferredFileName ??
+        selectedRecordingFileName ??
+        response.items[0]?.fileName ??
+        null;
+      if (!candidate) {
+        clearRecordingPreview();
+        return;
       }
-      return;
-    }
 
-    if (state.startTouches !== 2) {
-      return;
-    }
+      const nextSelection = response.items.some((item) => item.fileName === candidate)
+        ? candidate
+        : response.items[0]?.fileName ?? null;
+      if (!nextSelection) {
+        clearRecordingPreview();
+        return;
+      }
 
-    const pinchDelta = state.latestDistance - state.startDistance;
-    if (Math.abs(pinchDelta) >= 24) {
-      void handlePinchGesture(pinchDelta > 0 ? "in" : "out");
-      return;
-    }
-
-    const deltaX = state.latestCentroid.clientX - state.startCentroid.clientX;
-    const deltaY = state.latestCentroid.clientY - state.startCentroid.clientY;
-    if (Math.abs(deltaX) >= 14 || Math.abs(deltaY) >= 14) {
-      void handleTwoFingerScrollGesture(deltaX, deltaY);
-      return;
-    }
-
-    if (duration <= 350) {
-      void handleTwoFingerTapGesture(state.startCentroid);
+      await previewRecording(nextSelection);
+    } catch (error) {
+      setRecordingsError(resolveErrorMessage(error, "Failed to load recordings."));
+    } finally {
+      setRecordingsLoading(false);
     }
   }
 
-  async function handleSingleTapGesture(point: TouchPoint) {
-    const remote = mapTouchPointToRemote(point, gestureSurfaceRef.current, remoteSession.captureState);
-    if (!remote) {
-      return;
-    }
+  async function previewRecording(fileName: string) {
+    setRecordingsError("");
 
-    await runGestureAction(
-      () =>
-        sendMouseInput(activeBaseUrl, {
-          x: remote.x,
-          y: remote.y,
-          button: "left",
-          action: "click"
-        }),
-      "Single tap mapped to left click."
-    );
+    try {
+      const blob = await downloadRecording(activeBaseUrl, fileName);
+      const previewUrl = URL.createObjectURL(blob);
+      if (recordingPreviewUrlRef.current) {
+        URL.revokeObjectURL(recordingPreviewUrlRef.current);
+      }
+      recordingPreviewUrlRef.current = previewUrl;
+      setSelectedRecordingFileName(fileName);
+      setSelectedRecordingUrl(previewUrl);
+    } catch (error) {
+      setRecordingsError(resolveErrorMessage(error, "Failed to load recording preview."));
+    }
   }
 
-  async function handleTwoFingerTapGesture(point: TouchPoint) {
-    const remote = mapTouchPointToRemote(point, gestureSurfaceRef.current, remoteSession.captureState);
-    if (!remote) {
-      return;
+  function clearRecordingPreview() {
+    if (recordingPreviewUrlRef.current) {
+      URL.revokeObjectURL(recordingPreviewUrlRef.current);
+      recordingPreviewUrlRef.current = null;
     }
-
-    await runGestureAction(
-      () =>
-        sendMouseInput(activeBaseUrl, {
-          x: remote.x,
-          y: remote.y,
-          button: "right",
-          action: "click"
-        }),
-      "Two-finger tap mapped to right click."
-    );
+    setSelectedRecordingFileName(null);
+    setSelectedRecordingUrl(null);
   }
 
-  async function handleLongPressGesture(point: TouchPoint) {
-    const remote = mapTouchPointToRemote(point, gestureSurfaceRef.current, remoteSession.captureState);
-    if (!remote) {
-      return;
+  async function downloadRecordingFile(fileName: string) {
+    try {
+      const blob = await downloadRecording(activeBaseUrl, fileName);
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = fileName;
+      anchor.rel = "noreferrer";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      setFeedback(`Downloaded recording ${fileName}.`);
+    } catch (error) {
+      setRecordingsError(resolveErrorMessage(error, "Failed to download recording."));
     }
-
-    await runGestureAction(async () => {
-      await sendMouseInput(activeBaseUrl, {
-        x: remote.x,
-        y: remote.y,
-        button: "left",
-        action: "down"
-      });
-      await waitMs(320);
-      return sendMouseInput(activeBaseUrl, {
-        x: remote.x,
-        y: remote.y,
-        button: "left",
-        action: "up"
-      });
-    }, "Long press mapped to press-and-hold.");
-  }
-
-  async function handleTwoFingerScrollGesture(deltaX: number, deltaY: number) {
-    const scaledX = Math.round(deltaX * 3);
-    const scaledY = Math.round(deltaY * 3);
-    if (scaledX === 0 && scaledY === 0) {
-      return;
-    }
-
-    await runGestureAction(
-      () =>
-        sendScrollInput(activeBaseUrl, {
-          deltaX: scaledX,
-          deltaY: scaledY
-        }),
-      "Two-finger scroll mapped to input scroll."
-    );
-  }
-
-  async function handlePinchGesture(direction: "in" | "out") {
-    await runGestureAction(
-      () =>
-        sendHotkeyInput(activeBaseUrl, {
-          keys: direction === "in" ? ["ctrl", "plus"] : ["ctrl", "minus"]
-        }),
-      direction === "in" ? "Pinch-out mapped to zoom in." : "Pinch-in mapped to zoom out."
-    );
   }
 
   function appendVoiceDraftToPrompt() {
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     const trimmed = voiceDraft.trim();
     if (!trimmed) {
       setFeedback("Voice draft is empty.");
@@ -755,6 +1037,11 @@ export function ConsoleRoute() {
   }
 
   async function uploadSelectedImage() {
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     if (!selectedImage) {
       setFeedback("Select an image file before upload.");
       return;
@@ -916,7 +1203,80 @@ export function ConsoleRoute() {
 
   async function openFilesWorkspace() {
     setFilesWorkspaceOpen(true);
-    await loadProjectFiles();
+    await Promise.all([loadProjectFiles(), loadAgentFiles()]);
+  }
+
+  async function loadAgentFiles(path = "uploads") {
+    setAgentFilesLoading(true);
+    setAgentFilesError("");
+    setAgentFilesPermissionDenied(false);
+    try {
+      const files = await requestAgentFiles(activeBaseUrl, path, 100);
+      setAgentFiles(files);
+    } catch (error) {
+      if (error instanceof CeryxApiError && error.code === "E_PERMISSION_DENIED") {
+        setAgentFilesPermissionDenied(true);
+      }
+
+      setAgentFilesError(resolveErrorMessage(error, "Failed to load agent files."));
+      setAgentFiles([]);
+    } finally {
+      setAgentFilesLoading(false);
+    }
+  }
+
+  async function uploadSelectedAgentFile() {
+    if (!transferFile) {
+      setAgentFilesError("Select a file before uploading.");
+      return;
+    }
+
+    setTransferUploading(true);
+    setAgentFilesError("");
+    try {
+      await uploadAgentFile(
+        activeBaseUrl,
+        transferFile,
+        transferTargetPath.trim() ? transferTargetPath.trim() : undefined
+      );
+      setTransferFile(null);
+      await loadAgentFiles();
+    } catch (error) {
+      if (error instanceof CeryxApiError && error.code === "E_PERMISSION_DENIED") {
+        setAgentFilesPermissionDenied(true);
+      }
+
+      setAgentFilesError(resolveErrorMessage(error, "Failed to upload file."));
+    } finally {
+      setTransferUploading(false);
+    }
+  }
+
+  async function downloadSelectedAgentFile(file: FileTransferEntry) {
+    try {
+      const blob = await downloadAgentFile(activeBaseUrl, file.fileId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file.fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setAgentFilesError(resolveErrorMessage(error, "Failed to download file."));
+    }
+  }
+
+  async function deleteSelectedAgentFile(file: FileTransferEntry) {
+    try {
+      await deleteAgentFile(activeBaseUrl, file.fileId);
+      await loadAgentFiles();
+    } catch (error) {
+      if (error instanceof CeryxApiError && error.code === "E_PERMISSION_DENIED") {
+        setAgentFilesPermissionDenied(true);
+      }
+
+      setAgentFilesError(resolveErrorMessage(error, "Failed to delete file."));
+    }
   }
 
   async function loadProjectTasks() {
@@ -1108,6 +1468,11 @@ export function ConsoleRoute() {
       return;
     }
 
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     setDraft(
       [
         `Explain this diff and highlight risks for ${selectedDiff.path}:`,
@@ -1123,6 +1488,11 @@ export function ConsoleRoute() {
       return;
     }
 
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     setDraft(
       [
         `Use this diff as context and continue implementing for ${selectedDiff.path}:`,
@@ -1134,48 +1504,41 @@ export function ConsoleRoute() {
   }
 
   async function handlePasteToWindowsClipboard() {
-    if (!navigator.clipboard?.readText) {
+    if (!navigator.clipboard?.readText && !navigator.clipboard?.read) {
       return { message: "iPad clipboard read is unavailable in this browser context." };
     }
 
-    const text = await navigator.clipboard.readText();
-    if (!text.trim()) {
+    const payload = await readLocalClipboardPayload();
+    if (!payload) {
       return { message: "iPad clipboard is empty." };
     }
 
-    const response = await sendClipboard(activeBaseUrl, {
-      type: "text",
-      content: text,
-      mimeType: "text/plain"
-    });
+    const response = await sendLocalClipboardPayloadToWindows(activeBaseUrl, payload);
+    clipboardAutoSyncSignatureRef.current = clipboardPayloadSignature(payload);
+    clipboardAutoSyncErrorRef.current = "";
     return { message: `Clipboard sent to Windows (${response.sizeBytes} bytes).` };
   }
 
   async function handleCopyFromWindowsClipboard() {
+    if (inputLockActive) {
+      return { message: "Local input is locked while capturing." };
+    }
+
     if (!navigator.clipboard) {
       return { message: "iPad clipboard access is unavailable in this browser context." };
     }
 
-    const payload = await receiveClipboard(activeBaseUrl);
+    const payload = await copyWindowsClipboardToLocal(activeBaseUrl);
     if (payload.type === "text") {
-      if (!navigator.clipboard.writeText) {
-        return { message: "iPad clipboard write is unavailable in this browser context." };
-      }
-
-      await navigator.clipboard.writeText(payload.content);
       setDraft(payload.content);
+      clipboardAutoSyncSignatureRef.current = clipboardPayloadSignature(payload);
+      clipboardAutoSyncErrorRef.current = "";
       return { message: "Windows clipboard copied to iPad and inserted into prompt draft." };
     }
 
     if (payload.type === "image") {
-      if (typeof ClipboardItem === "undefined" || !navigator.clipboard.write) {
-        return { message: "Image clipboard is unavailable in this browser." };
-      }
-
-      const imageBlob = decodeBase64ToBlob(payload.content, payload.mimeType);
-      await navigator.clipboard.write([
-        new ClipboardItem({ [payload.mimeType || "image/png"]: imageBlob })
-      ]);
+      clipboardAutoSyncSignatureRef.current = clipboardPayloadSignature(payload);
+      clipboardAutoSyncErrorRef.current = "";
       return { message: "Windows image clipboard copied to iPad." };
     }
 
@@ -1184,6 +1547,20 @@ export function ConsoleRoute() {
 
   const sidePanelContent = (
     <div data-testid="ipad-side-panel" style={{ display: "grid", gap: 16, alignContent: "start" }}>
+      <CodexWindowSwitcher
+        size="ipad"
+        title="Codex Windows"
+        variant="cards"
+        windows={codexWindows}
+        activeWindowId={activeWindowId}
+        previewUrls={windowPreviewUrls}
+        loading={codexWindowsLoading}
+        error={codexWindowsError}
+        disabled={!connected}
+        onSelectWindow={(windowId) => void selectWindow(windowId)}
+        onRefresh={() => void refreshConsole()}
+      />
+
       <Panel size="ipad" style={{ display: "grid", gap: 12 }}>
         <strong style={{ fontSize: 20 }}>Inspector</strong>
         <div style={{ color: ceryxColors.onSurfaceVariant, display: "grid", gap: 8 }}>
@@ -1204,7 +1581,26 @@ export function ConsoleRoute() {
           <div>Recording: {recordingActive ? "active" : "idle"}</div>
           <div>Codex: {codexStatus}</div>
           <div>Capture: {remoteSession.captureState.active ? "active" : "idle"}</div>
+          <div>Input lock: {inputLockPreference ? "on" : "off"}</div>
         </div>
+
+        <RecordingPanel
+          size="ipad"
+          connected={connected}
+          loading={recordingsLoading}
+          error={recordingsError}
+          recordingActive={recordingActive}
+          recordingAudioActive={recordingAudioActive}
+          recordingMode={recordingMode}
+          recordings={recordings}
+          selectedRecordingFileName={selectedRecordingFileName}
+          selectedRecordingUrl={selectedRecordingUrl}
+          onRecordingModeChange={setRecordingMode}
+          onToggleRecording={() => void handleRecord()}
+          onRefreshRecordings={() => void loadRecordings()}
+          onSelectRecording={(fileName) => void previewRecording(fileName)}
+          onDownloadRecording={(fileName) => void downloadRecordingFile(fileName)}
+        />
 
         {feedback ? (
           <Panel
@@ -1225,7 +1621,7 @@ export function ConsoleRoute() {
           <Button
             size="ipad"
             variant="secondary"
-            disabled={!connected}
+            disabled={!connected || inputLockActive}
             onClick={() => setVoiceSheetOpen(true)}
           >
             Voice Input
@@ -1233,7 +1629,7 @@ export function ConsoleRoute() {
           <Button
             size="ipad"
             variant="secondary"
-            disabled={!connected || !canUploadImage}
+            disabled={!connected || !canUploadImage || inputLockActive}
             onClick={() => setImageSheetOpen(true)}
           >
             Image Upload
@@ -1296,7 +1692,7 @@ export function ConsoleRoute() {
         history={history}
         isSending={isSending}
         lastError={promptError}
-        disabled={!connected}
+        disabled={!connected || inputLockActive}
         onDraftChange={setDraft}
         onTemplateSelect={applyTemplate}
         onSend={(submit) => void handleSendPrompt(submit)}
@@ -1409,7 +1805,7 @@ export function ConsoleRoute() {
             void runToolbarAction(async () => {
               const response = remoteSession.captureState.active
                 ? await stopCapture(activeBaseUrl)
-                : await startCapture(activeBaseUrl, previewCaptureMode);
+                : await startCapture(activeBaseUrl, previewCaptureMode, activeWindowId ?? undefined);
               remoteSession.setCaptureState(response);
               if (response.active) {
                 setViewportMessage("Waiting for real frame...");
@@ -1434,9 +1830,9 @@ export function ConsoleRoute() {
               position: "relative",
               touchAction: "none"
             }}
-            onTouchStart={handleGestureTouchStart}
-            onTouchMove={handleGestureTouchMove}
-            onTouchEnd={handleGestureTouchEnd}
+            onTouchStart={gestureEngine.onTouchStart}
+            onTouchMove={gestureEngine.onTouchMove}
+            onTouchEnd={gestureEngine.onTouchEnd}
           >
             {viewportPreview.frameUrl ? (
               <img
@@ -1491,6 +1887,29 @@ export function ConsoleRoute() {
                 {webRtcViewport.stream ? "webrtc" : (viewportPreview.capturedAt || "none")}
               </div>
             </div>
+
+            {pipWindow ? (
+              <CodexWindowPipPreview
+                size="ipad"
+                window={pipWindow}
+                activeWindowId={activeWindowId}
+                previewUrl={pipPreviewUrl ?? undefined}
+                onSelectWindow={(windowId) => void selectWindow(windowId)}
+                onClose={() =>
+                  setPipDismissedWindowIds((current) =>
+                    current.includes(pipWindow.windowId ?? "")
+                      ? current
+                      : [...current, pipWindow.windowId ?? ""]
+                  )
+                }
+                style={{
+                  bottom: 16,
+                  position: "absolute",
+                  right: 16,
+                  zIndex: 2
+                }}
+              />
+            ) : null}
           </div>
         </RemoteViewport>
 
@@ -1571,6 +1990,7 @@ export function ConsoleRoute() {
                 label="Transcript Placeholder"
                 value={voiceDraft}
                 hint="This placeholder simulates voice recognition text."
+                disabled={inputLockActive}
                 onChange={(event) => setVoiceDraft(event.target.value)}
                 style={{ minHeight: 120 }}
               />
@@ -1578,7 +1998,11 @@ export function ConsoleRoute() {
                 <Button size="ipad" variant="ghost" onClick={() => setVoiceSheetOpen(false)}>
                   Cancel
                 </Button>
-                <Button size="ipad" disabled={!voiceDraft.trim()} onClick={appendVoiceDraftToPrompt}>
+                <Button
+                  size="ipad"
+                  disabled={inputLockActive || !voiceDraft.trim()}
+                  onClick={appendVoiceDraftToPrompt}
+                >
                   Insert Draft
                 </Button>
               </div>
@@ -1621,6 +2045,7 @@ export function ConsoleRoute() {
                 aria-label="Image file input"
                 type="file"
                 accept="image/*"
+                disabled={inputLockActive}
                 onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
               />
               <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 13 }}>
@@ -1632,7 +2057,7 @@ export function ConsoleRoute() {
                 </Button>
                 <Button
                   size="ipad"
-                  disabled={!selectedImage || uploadingImage || !canUploadImage}
+                  disabled={inputLockActive || !selectedImage || uploadingImage || !canUploadImage}
                   onClick={() => void uploadSelectedImage()}
                 >
                   {uploadingImage ? "Uploading..." : "Upload Image"}
@@ -1685,6 +2110,9 @@ export function ConsoleRoute() {
                           ? `synced ${formatTimestamp(settingsUpdatedAt)}`
                           : "synced"}
                   </span>
+                  <StatusChip tone={inputLockPreference ? "warning" : "neutral"}>
+                    input lock: {inputLockPreference ? "on" : "off"}
+                  </StatusChip>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <Button
@@ -1694,6 +2122,14 @@ export function ConsoleRoute() {
                     onClick={() => void loadSettingsState()}
                   >
                     Refresh
+                  </Button>
+                  <Button
+                    size="ipad"
+                    variant="secondary"
+                    disabled={settingsLoading || settingsSaving || !clientSettingsDraft}
+                    onClick={() => updateInputLockPreference(!inputLockPreference)}
+                  >
+                    {inputLockPreference ? "Unlock Input" : "Lock Input"}
                   </Button>
                   <Button size="ipad" variant="ghost" onClick={() => setSettingsSheetOpen(false)}>
                     Close
@@ -1744,6 +2180,7 @@ export function ConsoleRoute() {
                           <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Theme</span>
                           <select
                             value={clientSettingsDraft.theme}
+                            disabled={inputLockActive}
                             onChange={(event) =>
                               setClientSettingsDraft((current) =>
                                 current ? { ...current, theme: event.target.value } : current
@@ -1759,6 +2196,7 @@ export function ConsoleRoute() {
                         <IpadCheckboxRow
                           label="Compact mode"
                           checked={clientSettingsDraft.compactMode}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, compactMode: checked } : current
@@ -1768,13 +2206,42 @@ export function ConsoleRoute() {
                         <IpadCheckboxRow
                           label="Show latency in inspector"
                           checked={clientSettingsDraft.showLatency}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, showLatency: checked } : current
                             )
                           }
                         />
+                        <IpadCheckboxRow
+                          label="Auto-sync clipboard to Windows"
+                          checked={Boolean(clientSettingsDraft.clipboardAutoSync ?? false)}
+                          disabled={inputLockActive}
+                          onChange={(checked) =>
+                            setClientSettingsDraft((current) =>
+                              current ? { ...current, clipboardAutoSync: checked } : current
+                            )
+                          }
+                        />
+                        <IpadCheckboxRow
+                          label="Lock local input while capturing"
+                          checked={inputLockPreference}
+                          disabled={inputLockActive}
+                          onChange={(checked) => updateInputLockPreference(checked)}
+                        />
                       </div>
+                    ) : null}
+
+                    {settingsSection === "gestures" ? (
+                      <GestureSettingsEditor
+                        activeProfileId={activeGestureProfileId}
+                        bindings={gestureBindings}
+                        captureState={remoteSession.captureState}
+                        onBindingChange={updateGestureBinding}
+                        onProfileChange={updateGestureProfile}
+                        onReset={resetGestureProfile}
+                        profile={gestureProfile}
+                      />
                     ) : null}
 
                     {settingsSection === "agent" ? (
@@ -1787,7 +2254,7 @@ export function ConsoleRoute() {
                             type="number"
                             min={1}
                             max={65535}
-                            disabled={!canManageAgent}
+                            disabled={!canManageAgent || inputLockActive}
                             onChange={(event) => {
                               const parsed = Number.parseInt(event.target.value, 10);
                               if (!Number.isFinite(parsed)) {
@@ -1808,7 +2275,7 @@ export function ConsoleRoute() {
                           <textarea
                             rows={4}
                             value={agentSettingsDraft.directTestCommand}
-                            disabled={!canManageAgent}
+                            disabled={!canManageAgent || inputLockActive}
                             onChange={(event) =>
                               setAgentSettingsDraft((current) =>
                                 current ? { ...current, directTestCommand: event.target.value } : current
@@ -1842,6 +2309,7 @@ export function ConsoleRoute() {
                         <IpadCheckboxRow
                           label="Keyboard shortcuts enabled"
                           checked={clientSettingsDraft.keyboardShortcuts}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, keyboardShortcuts: checked } : current
@@ -1851,6 +2319,7 @@ export function ConsoleRoute() {
                         <IpadCheckboxRow
                           label="Notifications enabled"
                           checked={clientSettingsDraft.notificationsEnabled}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, notificationsEnabled: checked } : current
@@ -1869,6 +2338,7 @@ export function ConsoleRoute() {
                           </span>
                           <select
                             value={normalizePreviewRefreshProfile(clientSettingsDraft.previewRefreshProfile)}
+                            disabled={inputLockActive}
                             onChange={(event) =>
                               setClientSettingsDraft((current) =>
                                 current
@@ -1891,6 +2361,7 @@ export function ConsoleRoute() {
                           </span>
                           <select
                             value={clientSettingsDraft.viewportTransport ?? defaultViewportTransport}
+                            disabled={inputLockActive}
                             onChange={(event) =>
                               setClientSettingsDraft((current) =>
                                 current
@@ -1913,7 +2384,7 @@ export function ConsoleRoute() {
                           </span>
                           <select
                             value={agentSettingsDraft.defaultCaptureMode}
-                            disabled={!canManageAgent}
+                            disabled={!canManageAgent || inputLockActive}
                             onChange={(event) =>
                               setAgentSettingsDraft((current) =>
                                 current ? { ...current, defaultCaptureMode: event.target.value } : current
@@ -1929,7 +2400,7 @@ export function ConsoleRoute() {
                         <IpadCheckboxRow
                           label="Allow full-screen capture"
                           checked={agentSettingsDraft.allowFullscreenCapture}
-                          disabled={!canManageAgent}
+                          disabled={!canManageAgent || inputLockActive}
                           onChange={(checked) =>
                             setAgentSettingsDraft((current) =>
                               current ? { ...current, allowFullscreenCapture: checked } : current
@@ -2176,14 +2647,23 @@ export function ConsoleRoute() {
                 padding: 12
               }}
             >
-              <Button size="ipad" disabled={!selectedDiff} onClick={() => askCodexToExplainDiff()}>
+              <Button
+                size="ipad"
+                disabled={!selectedDiff || inputLockActive}
+                onClick={() => askCodexToExplainDiff()}
+              >
                 Ask Codex to Explain
               </Button>
               <Button
                 size="ipad"
-                disabled={!selectedDiff}
+                disabled={!selectedDiff || inputLockActive}
                 onClick={() => {
                   if (!selectedDiff) {
+                    return;
+                  }
+
+                  if (inputLockActive) {
+                    setFeedback("Local input is locked while capturing.");
                     return;
                   }
 
@@ -2196,7 +2676,11 @@ export function ConsoleRoute() {
               <Button size="ipad" disabled={!selectedDiff} onClick={() => void copyCurrentDiff()}>
                 Copy Diff
               </Button>
-              <Button size="ipad" disabled={!selectedDiff} onClick={() => openSelectedDiffInCodex()}>
+              <Button
+                size="ipad"
+                disabled={!selectedDiff || inputLockActive}
+                onClick={() => openSelectedDiffInCodex()}
+              >
                 Open in Codex
               </Button>
             </div>
@@ -2445,43 +2929,144 @@ export function ConsoleRoute() {
               </Button>
             </div>
             <div style={{ minHeight: 0, overflow: "auto", padding: 12 }}>
-              <Panel size="ipad" style={{ display: "grid", gap: 8 }}>
-                {filesPermissionDenied ? (
-                  <span style={{ color: "#ffb4a8", fontSize: 12 }}>
-                    Permission denied. Requires `read_diff`.
-                  </span>
-                ) : null}
-                {filesLoading ? <span>Loading files...</span> : null}
-                {!filesLoading && !filesPermissionDenied && projectFiles.length === 0 ? (
-                  <span>No files found.</span>
-                ) : null}
-                {!filesLoading && !filesPermissionDenied
-                  ? projectFiles.map((file) => (
-                      <div
-                        key={file.path}
-                        style={{
-                          border: `1px solid ${ceryxColors.outlineVariant}`,
-                          borderRadius: 8,
-                          display: "grid",
-                          gap: 6,
-                          gridTemplateColumns: "minmax(0, 1fr) auto auto",
-                          padding: "8px 10px"
-                        }}
-                      >
-                        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {file.path}
+              <div style={{ display: "grid", gap: 12 }}>
+                <Panel size="ipad" style={{ display: "grid", gap: 8 }}>
+                  {filesPermissionDenied ? (
+                    <span style={{ color: "#ffb4a8", fontSize: 12 }}>
+                      Permission denied. Requires `read_diff`.
+                    </span>
+                  ) : null}
+                  {filesLoading ? <span>Loading files...</span> : null}
+                  {!filesLoading && !filesPermissionDenied && projectFiles.length === 0 ? (
+                    <span>No files found.</span>
+                  ) : null}
+                  {!filesLoading && !filesPermissionDenied
+                    ? projectFiles.map((file) => (
+                        <div
+                          key={file.path}
+                          style={{
+                            border: `1px solid ${ceryxColors.outlineVariant}`,
+                            borderRadius: 8,
+                            display: "grid",
+                            gap: 6,
+                            gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                            padding: "8px 10px"
+                          }}
+                        >
+                          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {file.path}
+                          </div>
+                          <StatusChip tone={file.changed ? "warning" : "neutral"}>
+                            {file.changed ? "changed" : "clean"}
+                          </StatusChip>
+                          <StatusChip tone={file.tracked ? "success" : "neutral"}>
+                            {file.tracked ? "tracked" : "untracked"}
+                          </StatusChip>
                         </div>
-                        <StatusChip tone={file.changed ? "warning" : "neutral"}>
-                          {file.changed ? "changed" : "clean"}
-                        </StatusChip>
-                        <StatusChip tone={file.tracked ? "success" : "neutral"}>
-                          {file.tracked ? "tracked" : "untracked"}
-                        </StatusChip>
-                      </div>
-                    ))
-                  : null}
-                {filesError ? <span style={{ color: "#ffb4a8", fontSize: 12 }}>{filesError}</span> : null}
-              </Panel>
+                      ))
+                    : null}
+                  {filesError ? <span style={{ color: "#ffb4a8", fontSize: 12 }}>{filesError}</span> : null}
+                </Panel>
+
+                <Panel data-testid="ipad-agent-file-transfer" size="ipad" style={{ display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <strong>Agent File Transfers</strong>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Button
+                        size="ipad"
+                        variant="secondary"
+                        disabled={agentFilesLoading}
+                        onClick={() => void loadAgentFiles()}
+                      >
+                        Refresh Uploads
+                      </Button>
+                      <Button
+                        size="ipad"
+                        disabled={transferUploading || !transferFile}
+                        onClick={() => void uploadSelectedAgentFile()}
+                      >
+                        {transferUploading ? "Uploading..." : "Upload File"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setTransferFile(event.dataTransfer.files?.[0] ?? null);
+                    }}
+                    style={{
+                      alignItems: "center",
+                      border: `1px dashed ${ceryxColors.outlineVariant}`,
+                      borderRadius: 10,
+                      display: "grid",
+                      gap: 8,
+                      padding: 12
+                    }}
+                  >
+                    <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+                      Drop a file here or choose one below. Files up to 100 MB are supported.
+                    </div>
+                    <input
+                      aria-label="Transfer file input"
+                      onChange={(event) => setTransferFile(event.target.files?.[0] ?? null)}
+                      type="file"
+                    />
+                    <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+                      {transferFile ? `Selected: ${transferFile.name}` : "No file selected."}
+                    </div>
+                    <input
+                      aria-label="Transfer target path"
+                      value={transferTargetPath}
+                      onChange={(event) => setTransferTargetPath(event.target.value)}
+                      placeholder="Target path (optional)"
+                      style={ipadFieldStyle}
+                    />
+                  </div>
+                  {agentFilesPermissionDenied ? (
+                    <span style={{ color: "#ffb4a8", fontSize: 12 }}>
+                      Permission denied. Requires `manage_agent`.
+                    </span>
+                  ) : null}
+                  {agentFilesLoading ? <span>Loading agent files...</span> : null}
+                  {!agentFilesLoading && !agentFilesPermissionDenied && agentFiles.length === 0 ? (
+                    <span>No uploaded files yet.</span>
+                  ) : null}
+                  {!agentFilesLoading && !agentFilesPermissionDenied
+                    ? agentFiles.map((file) => (
+                        <div
+                          key={file.fileId}
+                          data-testid={`ipad-agent-file-${file.fileId}`}
+                          style={{
+                            border: `1px solid ${ceryxColors.outlineVariant}`,
+                            borderRadius: 8,
+                            display: "grid",
+                            gap: 6,
+                            gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                            padding: "8px 10px"
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{file.fileName}</div>
+                            <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 11 }}>
+                              {file.mimeType} · {file.sizeBytes} bytes
+                            </div>
+                            <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 11 }}>
+                              Uploaded {new Date(file.uploadedAt).toLocaleString()}
+                            </div>
+                          </div>
+                          <Button size="ipad" variant="secondary" onClick={() => void downloadSelectedAgentFile(file)}>
+                            Download
+                          </Button>
+                          <Button size="ipad" variant="ghost" onClick={() => void deleteSelectedAgentFile(file)}>
+                            Delete
+                          </Button>
+                        </div>
+                      ))
+                    : null}
+                  {agentFilesError ? <span style={{ color: "#ffb4a8", fontSize: 12 }}>{agentFilesError}</span> : null}
+                </Panel>
+              </div>
             </div>
           </section>
         </div>
@@ -2744,8 +3329,10 @@ export function ConsoleRoute() {
             onPasteToWindows={() =>
               void runToolbarAction(() => handlePasteToWindowsClipboard())
             }
-            onCopyFromWindows={() =>
-              void runToolbarAction(() => handleCopyFromWindowsClipboard())
+            onCopyFromWindows={
+              inputLockActive
+                ? undefined
+                : () => void runToolbarAction(() => handleCopyFromWindowsClipboard())
             }
           />
         </div>
@@ -2869,6 +3456,330 @@ const ipadFieldStyle: CSSProperties = {
   padding: "0 10px"
 };
 
+function GestureSettingsEditor({
+  activeProfileId,
+  bindings,
+  captureState,
+  onBindingChange,
+  onProfileChange,
+  onReset,
+  profile
+}: {
+  activeProfileId: string;
+  bindings: ReturnType<typeof gestureBindingsForProfile>;
+  captureState: Pick<CaptureStateResponse, "width" | "height"> | null | undefined;
+  onBindingChange: (bindingId: GestureBindingId, mapping: GestureMapping) => void;
+  onProfileChange: (profileId: string) => void;
+  onReset: () => void;
+  profile: GestureProfile;
+}) {
+  const previewSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const [previewMessage, setPreviewMessage] = useState("Try a gesture on the preview surface.");
+
+  const previewEngine = useGestureEngine({
+    enabled: true,
+    profile,
+    captureState,
+    surfaceRef: previewSurfaceRef,
+    callbacks: {
+      mouseMove: async () => {
+        setPreviewMessage("Single-finger drag preview: pointer movement.");
+      },
+      leftClick: async () => {
+        setPreviewMessage("Single-finger tap preview: left click.");
+      },
+      rightClick: async () => {
+        setPreviewMessage("Two-finger tap preview: right click.");
+      },
+      pressHold: async () => {
+        setPreviewMessage("Long press preview: press and hold.");
+      },
+      scroll: async (request) => {
+        setPreviewMessage(`Scroll preview: ${request.deltaY >= 0 ? "down" : "up"} ${Math.abs(request.deltaY)}.`);
+      },
+      hotkey: async (request) => {
+        setPreviewMessage(`Hotkey preview: ${request.keys.join("+")}.`);
+      },
+      toggleToolbar: async () => {
+        setPreviewMessage("Three-finger tap preview: toggle toolbar.");
+      }
+    },
+    onError: (message) => setPreviewMessage(message)
+  });
+
+  const profileOptions = [
+    defaultGestureProfiles.default,
+    defaultGestureProfiles.precision,
+    createDefaultCustomGestureProfile()
+  ];
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <strong>Gesture Profile</strong>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Active profile</span>
+          <select
+            aria-label="Gesture profile"
+            value={activeProfileId}
+            onChange={(event) => onProfileChange(event.target.value)}
+            style={ipadFieldStyle}
+          >
+            {profileOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <StatusChip tone={activeProfileId === "custom" ? "warning" : "success"}>
+            {profile.name}
+          </StatusChip>
+          <Button size="ipad" variant="secondary" onClick={onReset}>
+            Reset to Default
+          </Button>
+        </div>
+        <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+          {activeProfileId === "custom"
+            ? "Editing any binding will keep the profile in Custom mode."
+            : "Switch to Custom to fine-tune individual gesture bindings."}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        <strong>Gesture Preview</strong>
+        <div
+          ref={previewSurfaceRef}
+          aria-label="Gesture preview area"
+          data-testid="ipad-gesture-preview"
+          onTouchEnd={previewEngine.onTouchEnd}
+          onTouchMove={previewEngine.onTouchMove}
+          onTouchStart={previewEngine.onTouchStart}
+          style={{
+            alignItems: "center",
+            background:
+              "linear-gradient(135deg, rgba(233, 229, 221, 0.88), rgba(250, 247, 243, 0.96))",
+            border: `1px solid ${ceryxColors.outlineVariant}`,
+            borderRadius: 14,
+            color: ceryxColors.onSurface,
+            display: "grid",
+            minHeight: 168,
+            overflow: "hidden",
+            padding: 16,
+            touchAction: "none"
+          }}
+        >
+          <div style={{ display: "grid", gap: 8, justifyItems: "center", textAlign: "center" }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Codex Preview Surface</div>
+            <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12, maxWidth: 320 }}>
+              {previewMessage}
+            </div>
+            <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+              {captureState?.width && captureState?.height
+                ? `${captureState.width} × ${captureState.height}`
+                : "Preview adapts to the live capture size."}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        <strong>Gesture Bindings</strong>
+        {bindings.map(({ definition, mapping }) => {
+          const action = (mapping.action as GestureActionId) ?? "none";
+          const params = mapping.params ?? {};
+          const showSensitivity = action === "mouse_move" || action === "scroll" || action === "zoom";
+          const showInvertScroll = action === "scroll";
+          const showZoomMode = action === "zoom";
+          const showHotkey = action === "hotkey";
+
+          return (
+            <div
+              key={definition.id}
+              style={{
+                border: `1px solid ${ceryxColors.outlineVariant}`,
+                borderRadius: 12,
+                display: "grid",
+                gap: 12,
+                padding: 12
+              }}
+            >
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ alignItems: "center", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <strong>{definition.label}</strong>
+                  <StatusChip tone={action === "none" ? "neutral" : "success"}>
+                    {gestureActionLabel(action)}
+                  </StatusChip>
+                </div>
+                <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>{definition.description}</div>
+              </div>
+
+              <div style={{ display: "grid", gap: 10 }}>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Action</span>
+                  <select
+                    aria-label={`${definition.label} action`}
+                    value={action}
+                    onChange={(event) =>
+                      onBindingChange(
+                        definition.id,
+                        buildGestureMappingForAction(event.target.value as GestureActionId, mapping)
+                      )
+                    }
+                    style={ipadFieldStyle}
+                  >
+                    {gestureActionOptions.map((option) => (
+                      <option key={option.id} value={option.id} title={option.description}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {showSensitivity ? (
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Sensitivity</span>
+                    <input
+                      aria-label={`${definition.label} sensitivity`}
+                      max={3}
+                      min={0.1}
+                      step={0.1}
+                      type="number"
+                      value={params.sensitivity ?? 1}
+                      onChange={(event) =>
+                        onBindingChange(definition.id, {
+                          action,
+                          params: {
+                            ...params,
+                            sensitivity: normalizeGestureSensitivity(event.target.value)
+                          }
+                        })
+                      }
+                      style={ipadFieldStyle}
+                    />
+                  </label>
+                ) : null}
+
+                {showInvertScroll ? (
+                  <IpadCheckboxRow
+                    label="Invert scroll direction"
+                    checked={Boolean(params.invertScroll)}
+                    onChange={(checked) =>
+                      onBindingChange(definition.id, {
+                        action,
+                        params: {
+                          ...params,
+                          invertScroll: checked
+                        }
+                      })
+                    }
+                  />
+                ) : null}
+
+                {showZoomMode ? (
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Zoom mode</span>
+                    <select
+                      aria-label={`${definition.label} zoom mode`}
+                      value={params.zoomMode ?? "pinch"}
+                      onChange={(event) =>
+                        onBindingChange(definition.id, {
+                          action,
+                          params: {
+                            ...params,
+                            zoomMode: event.target.value === "drag" ? "drag" : "pinch"
+                          }
+                        })
+                      }
+                      style={ipadFieldStyle}
+                    >
+                      <option value="pinch">Pinch</option>
+                      <option value="drag">Drag</option>
+                    </select>
+                  </label>
+                ) : null}
+
+                {showHotkey ? (
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Hotkey</span>
+                    <input
+                      aria-label={`${definition.label} hotkey`}
+                      placeholder="Ctrl+Shift+Z"
+                      value={params.hotkey ?? ""}
+                      onChange={(event) =>
+                        onBindingChange(definition.id, {
+                          action,
+                          params: {
+                            ...params,
+                            hotkey: event.target.value
+                          }
+                        })
+                      }
+                      style={ipadFieldStyle}
+                    />
+                  </label>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function buildGestureMappingForAction(
+  action: GestureActionId,
+  current?: GestureMapping
+): GestureMapping {
+  const params = current?.params ?? {};
+
+  switch (action) {
+    case "mouse_move":
+      return {
+        action,
+        params: {
+          sensitivity: normalizeGestureSensitivity(params.sensitivity ?? 1)
+        }
+      };
+    case "scroll":
+      return {
+        action,
+        params: {
+          sensitivity: normalizeGestureSensitivity(params.sensitivity ?? 1),
+          invertScroll: params.invertScroll ?? false
+        }
+      };
+    case "zoom":
+      return {
+        action,
+        params: {
+          sensitivity: normalizeGestureSensitivity(params.sensitivity ?? 1),
+          zoomMode: params.zoomMode === "drag" ? "drag" : "pinch"
+        }
+      };
+    case "hotkey":
+      return {
+        action,
+        params: {
+          hotkey: params.hotkey ?? ""
+        }
+      };
+    default:
+      return { action };
+  }
+}
+
+function normalizeGestureSensitivity(value: string | number | undefined): number {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 1;
+  }
+
+  return Math.min(3, Math.max(0.1, parsed));
+}
+
 function IpadCheckboxRow({
   label,
   checked,
@@ -2903,18 +3814,107 @@ function equalAgentSettings(a: AgentSettingsState, b: AgentSettingsState): boole
   );
 }
 
+function resolveClientShortcutProfileState(settings: ClientSettingsState): ShortcutProfile {
+  return resolveShortcutProfile(
+    settings.activeShortcutProfile ?? "vscode-style",
+    settings.customShortcuts
+  );
+}
+
+function equalShortcutProfiles(a: ShortcutProfile, b: ShortcutProfile): boolean {
+  if (a.id !== b.id) {
+    return false;
+  }
+
+  return defaultShortcutDefinitions.every(
+    (definition) => (a.bindings[definition.id] ?? "") === (b.bindings[definition.id] ?? "")
+  );
+}
+
+function normalizeGestureProfileId(profileId: string | undefined): string {
+  if (profileId === "custom") {
+    return "custom";
+  }
+
+  if (profileId && profileId in defaultGestureProfiles) {
+    return profileId;
+  }
+
+  return "default";
+}
+
+function resolveClientGestureProfileState(settings: ClientSettingsState): {
+  activeProfile: GestureProfile;
+  activeProfileId: string;
+  customProfile: GestureProfile;
+} {
+  const activeProfileId = normalizeGestureProfileId(settings.activeGestureProfile);
+  const resolvedCustomProfile = settings.customGestures
+    ? normalizeGestureProfile(settings.customGestures)
+    : createDefaultCustomGestureProfile(
+        resolveGestureProfile(
+          activeProfileId,
+          settings.customGestures ?? createDefaultCustomGestureProfile(defaultGestureProfiles.default)
+        )
+      );
+
+  return {
+    activeProfileId,
+    activeProfile: resolveGestureProfile(activeProfileId, resolvedCustomProfile),
+    customProfile: resolvedCustomProfile
+  };
+}
+
+function equalGestureMappings(a: GestureMapping, b: GestureMapping): boolean {
+  if (a.action !== b.action) {
+    return false;
+  }
+
+  const aParams = a.params ?? {};
+  const bParams = b.params ?? {};
+  return (
+    (aParams.sensitivity ?? 1) === (bParams.sensitivity ?? 1) &&
+    Boolean(aParams.invertScroll ?? false) === Boolean(bParams.invertScroll ?? false) &&
+    (aParams.zoomMode ?? "pinch") === (bParams.zoomMode ?? "pinch") &&
+    (aParams.hotkey ?? "") === (bParams.hotkey ?? "")
+  );
+}
+
+function equalGestureProfiles(a: GestureProfile, b: GestureProfile): boolean {
+  const normalizedA = normalizeGestureProfile(a);
+  const normalizedB = normalizeGestureProfile(b);
+
+  if (normalizedA.id !== normalizedB.id || normalizedA.name !== normalizedB.name) {
+    return false;
+  }
+
+  return defaultGestureDefinitions.every((definition) =>
+    equalGestureMappings(normalizedA.bindings[definition.id], normalizedB.bindings[definition.id])
+  );
+}
+
 function equalClientSettings(a: ClientSettingsState, b: ClientSettingsState): boolean {
+  const aShortcutProfile = resolveClientShortcutProfileState(a);
+  const bShortcutProfile = resolveClientShortcutProfileState(b);
+  const aGestureState = resolveClientGestureProfileState(a);
+  const bGestureState = resolveClientGestureProfileState(b);
   return (
     a.theme === b.theme &&
     a.compactMode === b.compactMode &&
     a.showLatency === b.showLatency &&
+    (a.clipboardAutoSync ?? false) === (b.clipboardAutoSync ?? false) &&
+    (a.lockLocalInputWhenCapturing ?? true) === (b.lockLocalInputWhenCapturing ?? true) &&
     a.keyboardShortcuts === b.keyboardShortcuts &&
     a.notificationsEnabled === b.notificationsEnabled &&
     a.logsAutoRefresh === b.logsAutoRefresh &&
+    aGestureState.activeProfileId === bGestureState.activeProfileId &&
+    equalGestureProfiles(aGestureState.activeProfile, bGestureState.activeProfile) &&
+    equalGestureProfiles(aGestureState.customProfile, bGestureState.customProfile) &&
     normalizePreviewRefreshProfile(a.previewRefreshProfile) ===
       normalizePreviewRefreshProfile(b.previewRefreshProfile) &&
     (a.viewportTransport ?? defaultViewportTransport) ===
-      (b.viewportTransport ?? defaultViewportTransport)
+      (b.viewportTransport ?? defaultViewportTransport) &&
+    equalShortcutProfiles(aShortcutProfile, bShortcutProfile)
   );
 }
 
@@ -3025,13 +4025,42 @@ function readClientSettingsSnapshot(
 
   try {
     const parsed = JSON.parse(raw) as Partial<ClientSettingsState>;
+    const activeShortcutProfile =
+      typeof parsed.activeShortcutProfile === "string"
+        ? parsed.activeShortcutProfile
+        : (fallback.activeShortcutProfile ?? "vscode-style");
+    const customShortcutsSource = parsed.customShortcuts ?? fallback.customShortcuts;
+    const activeGestureProfile = normalizeGestureProfileId(
+      typeof parsed.activeGestureProfile === "string" ? parsed.activeGestureProfile : fallback.activeGestureProfile
+    );
+    const customGesturesSource = parsed.customGestures ?? fallback.customGestures;
     return {
       theme: parsed.theme ?? fallback.theme,
       compactMode: parsed.compactMode ?? fallback.compactMode,
       showLatency: parsed.showLatency ?? fallback.showLatency,
+      clipboardAutoSync: parsed.clipboardAutoSync ?? fallback.clipboardAutoSync ?? false,
+      lockLocalInputWhenCapturing:
+        parsed.lockLocalInputWhenCapturing ?? fallback.lockLocalInputWhenCapturing ?? true,
       keyboardShortcuts: parsed.keyboardShortcuts ?? fallback.keyboardShortcuts,
       notificationsEnabled: parsed.notificationsEnabled ?? fallback.notificationsEnabled,
       logsAutoRefresh: parsed.logsAutoRefresh ?? fallback.logsAutoRefresh,
+      activeGestureProfile,
+      customGestures: customGesturesSource
+        ? normalizeGestureProfile(customGesturesSource)
+        : createDefaultCustomGestureProfile(
+            resolveGestureProfile(
+              activeGestureProfile,
+              fallback.customGestures ?? createDefaultCustomGestureProfile(defaultGestureProfiles.default)
+            )
+          ),
+      activeShortcutProfile,
+      customShortcuts: customShortcutsSource
+        ? {
+            id: customShortcutsSource.id ?? "custom",
+            name: customShortcutsSource.name ?? "Custom",
+            bindings: normalizeShortcutBindings(customShortcutsSource.bindings ?? {})
+          }
+        : undefined,
       previewRefreshProfile: normalizePreviewRefreshProfile(
         parsed.previewRefreshProfile ?? fallback.previewRefreshProfile ?? defaultPreviewRefreshProfile
       ),
@@ -3049,84 +4078,6 @@ function writeClientSettingsSnapshot(storageKey: string, settings: ClientSetting
   }
 
   window.localStorage.setItem(storageKey, JSON.stringify(settings));
-}
-
-function clearLongPressTimer(timerRef: { current: ReturnType<typeof setTimeout> | null }) {
-  if (timerRef.current) {
-    clearTimeout(timerRef.current);
-    timerRef.current = null;
-  }
-}
-
-type TouchCollection = ArrayLike<TouchPoint> & {
-  item?: (index: number) => TouchPoint | null;
-};
-
-function readTouchPoints(touches: TouchCollection): TouchPoint[] {
-  const points: TouchPoint[] = [];
-  for (let index = 0; index < touches.length; index += 1) {
-    const point =
-      typeof touches.item === "function" ? touches.item(index) : (touches[index] ?? null);
-    if (!point) {
-      continue;
-    }
-
-    points.push({
-      clientX: point.clientX,
-      clientY: point.clientY
-    });
-  }
-
-  return points;
-}
-
-function centroidOf(points: TouchPoint[]): TouchPoint {
-  const sum = points.reduce(
-    (acc, point) => ({
-      clientX: acc.clientX + point.clientX,
-      clientY: acc.clientY + point.clientY
-    }),
-    { clientX: 0, clientY: 0 }
-  );
-
-  return {
-    clientX: sum.clientX / points.length,
-    clientY: sum.clientY / points.length
-  };
-}
-
-function distanceBetween(a: TouchPoint, b: TouchPoint): number {
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-}
-
-function mapTouchPointToRemote(
-  point: TouchPoint,
-  surface: HTMLDivElement | null,
-  captureState: { width: number; height: number }
-) {
-  if (!surface) {
-    return null;
-  }
-
-  const rect = surface.getBoundingClientRect();
-  const targetWidth = captureState.width > 0 ? captureState.width : Math.round(rect.width);
-  const targetHeight = captureState.height > 0 ? captureState.height : Math.round(rect.height);
-  const referenceWidth = rect.width > 0 ? rect.width : Math.max(1, targetWidth);
-  const referenceHeight = rect.height > 0 ? rect.height : Math.max(1, targetHeight);
-  const referenceLeft = rect.width > 0 ? rect.left : 0;
-  const referenceTop = rect.height > 0 ? rect.top : 0;
-
-  const localX = clamp(point.clientX - referenceLeft, 0, referenceWidth);
-  const localY = clamp(point.clientY - referenceTop, 0, referenceHeight);
-
-  return {
-    x: Math.round((localX / referenceWidth) * targetWidth),
-    y: Math.round((localY / referenceHeight) * targetHeight)
-  };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 
 function waitMs(durationMs: number): Promise<void> {

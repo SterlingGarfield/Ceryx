@@ -354,7 +354,10 @@ internal sealed class GdiWindowCaptureBackend : IWindowCaptureBackend
         }
 
         var raw = windowId["hwnd_".Length..];
-        if (!long.TryParse(raw, System.Globalization.NumberStyles.HexNumber, null, out var handleValue))
+        var handlePart = raw.Contains('_', StringComparison.Ordinal)
+            ? raw[(raw.LastIndexOf('_') + 1)..]
+            : raw;
+        if (!long.TryParse(handlePart, System.Globalization.NumberStyles.HexNumber, null, out var handleValue))
         {
             return false;
         }

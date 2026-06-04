@@ -31,6 +31,7 @@ public class AgentStatusTests
         Assert.True(root.TryGetProperty("supportsWebRTC", out _));
         Assert.True(root.TryGetProperty("supportsDesktopClient", out _));
         Assert.True(root.TryGetProperty("codexStatus", out _));
+        Assert.True(root.TryGetProperty("captureBackend", out _));
     }
 
     [Fact]

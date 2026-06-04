@@ -5,7 +5,8 @@ public sealed record CodexWindowCandidate(
     string Title,
     string ProcessName,
     bool IsFocused,
-    bool IsMinimized
+    bool IsMinimized,
+    int ProcessId = 0
 );
 
 public sealed record CodexWindowSnapshot(
@@ -14,5 +15,12 @@ public sealed record CodexWindowSnapshot(
     string? Title,
     string? ProcessName,
     int CandidateCount,
+    DateTimeOffset LastUpdatedAt
+);
+
+public sealed record CodexWindowListSnapshot(
+    IReadOnlyList<CodexWindowSnapshot> Windows,
+    string? ActiveWindowId,
+    int TotalCount,
     DateTimeOffset LastUpdatedAt
 );

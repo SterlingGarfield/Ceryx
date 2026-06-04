@@ -1,6 +1,6 @@
 import type { CeryxPermission } from "@ceryx/protocol";
 import { Button, Panel } from "@ceryx/ui";
-import { hasPermission } from "./defaultPermissions";
+import { hasPermission } from "./defaultPermissions.js";
 
 type ToolbarAction =
   | "approve"

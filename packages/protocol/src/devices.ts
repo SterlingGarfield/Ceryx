@@ -1,4 +1,4 @@
-import type { CeryxPermission } from "./permissions";
+import type { CeryxPermission } from "./permissions.js";
 
 export const ClientTypes = ["ipad", "desktop"] as const;
 export type ClientType = (typeof ClientTypes)[number];

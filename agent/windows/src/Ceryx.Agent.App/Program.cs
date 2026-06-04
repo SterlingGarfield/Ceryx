@@ -25,7 +25,10 @@ using System.Net;
 
 const int AgentHttpPort = 41527;
 
-var localPaths = LocalPaths.CreateDefault();
+var agentRootOverride = Environment.GetEnvironmentVariable("CERYX_AGENT_ROOT_OVERRIDE");
+var localPaths = !string.IsNullOrWhiteSpace(agentRootOverride)
+    ? new LocalPaths(Path.GetFullPath(agentRootOverride))
+    : LocalPaths.CreateDefault();
 localPaths.EnsureDirectories();
 
 Log.Logger = new LoggerConfiguration()
@@ -68,18 +71,24 @@ try
     builder.Services.AddSingleton<ISessionLockService, InMemorySessionLockService>();
     builder.Services.AddSingleton<IInputCommandMapper, DefaultInputCommandMapper>();
     builder.Services.AddSingleton<IInputBridge, NoOpInputBridge>();
-    builder.Services.AddSingleton<IClipboardService, MemoryClipboardService>();
+    builder.Services.AddSingleton<IClipboardService, WindowsClipboardService>();
     builder.Services.AddSingleton<IPromptBridgeService, PromptBridgeService>();
     builder.Services.AddSingleton<IImagePasteService, NoOpImagePasteService>();
     builder.Services.AddSingleton<ICaptureLifecycleService, InMemoryCaptureLifecycleService>();
-    builder.Services.AddSingleton<ICaptureSignalService, NoOpCaptureSignalService>();
+    builder.Services.AddSingleton<ICaptureSignalClock, SystemCaptureSignalClock>();
+    builder.Services.AddSingleton<ICaptureSignalService, CaptureSignalService>();
     builder.Services.AddSingleton<IDiskSpaceProvider, DriveDiskSpaceProvider>();
     builder.Services.AddSingleton<WindowImageCapture>();
     builder.Services.AddSingleton<IWindowImageCapture>(serviceProvider =>
         serviceProvider.GetRequiredService<WindowImageCapture>());
     builder.Services.AddSingleton<IWindowCaptureBackendInfo>(serviceProvider =>
         serviceProvider.GetRequiredService<WindowImageCapture>());
+    builder.Services.AddSingleton<IWebRtcFrameSource, WindowWebRtcFrameSource>();
     builder.Services.AddSingleton<IFramePreviewService, FramePreviewService>();
+    builder.Services.AddSingleton<IAudioCaptureService, WasapiLoopbackAudioCaptureService>();
+    builder.Services.AddSingleton<IRecordingMediaEncoder, FfmpegRecordingMediaEncoder>();
+    builder.Services.AddSingleton<IRecordingCatalogService, RecordingCatalogService>();
+    builder.Services.AddSingleton<IFileTransferService, FileTransferService>();
     builder.Services.AddSingleton<IUploadImageService, UploadImageService>();
     builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
     builder.Services.AddSingleton<IRecordingService, RecordingService>();

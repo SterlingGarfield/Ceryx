@@ -4,6 +4,8 @@ public interface ICodexWindowLocator
 {
     Task<CodexWindowSnapshot> GetWindowAsync(CancellationToken cancellationToken = default);
 
+    Task<CodexWindowListSnapshot> ListWindowsAsync(CancellationToken cancellationToken = default);
+
     Task<CodexWindowSnapshot> RefreshAsync(CancellationToken cancellationToken = default);
 
     Task<CodexWindowSnapshot> FocusAsync(CancellationToken cancellationToken = default);

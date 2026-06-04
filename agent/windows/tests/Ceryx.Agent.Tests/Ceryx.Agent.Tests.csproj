@@ -4,6 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
+    <CeryxRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\..'))</CeryxRepoRoot>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,5 +30,12 @@
     <ProjectReference Include="..\..\src\Ceryx.Agent.Project\Ceryx.Agent.Project.csproj" />
     <ProjectReference Include="..\..\src\Ceryx.Agent.Security\Ceryx.Agent.Security.csproj" />
     <ProjectReference Include="..\..\src\Ceryx.Agent.Storage\Ceryx.Agent.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>CeryxRepoRoot</_Parameter1>
+      <_Parameter2>$(CeryxRepoRoot)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 </Project>

@@ -1,5 +1,5 @@
-import type { ClientType } from "./devices";
-import type { CeryxPermission } from "./permissions";
+import type { ClientType } from "./devices.js";
+import type { CeryxPermission } from "./permissions.js";
 
 export interface PairingRequest {
   clientName: string;

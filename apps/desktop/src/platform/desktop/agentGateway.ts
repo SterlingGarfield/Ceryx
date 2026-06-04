@@ -13,6 +13,8 @@ import {
   type CaptureSignalResponse,
   type CaptureMode,
   type CaptureStateResponse,
+  type CodexWindowListResponse,
+  type CodexSelectWindowRequest,
   type CodexWindowSnapshot,
   type InputActionResponse,
   type LogsQuery,
@@ -20,6 +22,8 @@ import {
   type ProjectDiffFileResponse,
   type ProjectDiffFilesResponse,
   type ProjectDiffResponse,
+  type FileTransferEntry,
+  type FileTransferUploadResponse,
   type ProjectFilesResponse,
   type ProjectTasksResponse,
   type ProjectTestResponse,
@@ -27,6 +31,8 @@ import {
   type NotificationReadResponse,
   type NotificationsResponse,
   type PromptSendResponse,
+  type RecordingListResponse,
+  type RecordingStartRequest,
   type RecordingStartResponse,
   type RecordingStopResponse,
   type SettingsResponse,
@@ -149,10 +155,24 @@ export async function getCodexWindow(
   return getClient(baseUrl).getCodexWindow();
 }
 
+export async function listCodexWindows(
+  baseUrl = defaultLocalAgentBaseUrl
+): Promise<CodexWindowListResponse> {
+  return getClient(baseUrl).listCodexWindows();
+}
+
 export async function refreshCodexWindow(
   baseUrl = defaultLocalAgentBaseUrl
 ): Promise<CodexWindowSnapshot> {
   return getClient(baseUrl).refreshCodexWindow();
+}
+
+export async function selectCodexWindow(
+  baseUrl = defaultLocalAgentBaseUrl,
+  windowId: string
+): Promise<CodexWindowSnapshot> {
+  const request: CodexSelectWindowRequest = { windowId };
+  return getClient(baseUrl).selectCodexWindow(request);
 }
 
 export async function focusCodexWindow(
@@ -168,18 +188,21 @@ export async function getCaptureState(
 }
 
 export async function getCaptureFrame(
-  baseUrl = defaultLocalAgentBaseUrl
+  baseUrl = defaultLocalAgentBaseUrl,
+  windowId?: string
 ): Promise<CaptureFrameResult> {
-  return getClient(baseUrl).getCaptureFrame();
+  return getClient(baseUrl).getCaptureFrame(windowId);
 }
 
 export async function startCapture(
   baseUrl = defaultLocalAgentBaseUrl,
-  mode: CaptureMode = "balanced"
+  mode: CaptureMode = "balanced",
+  windowId?: string
 ): Promise<CaptureStateResponse> {
   return getClient(baseUrl).startCapture({
     mode,
-    target: "codex_window"
+    target: "codex_window",
+    windowId
   });
 }
 
@@ -221,6 +244,38 @@ export async function clearClipboard(
   baseUrl = defaultLocalAgentBaseUrl
 ): Promise<ClipboardClearResponse> {
   return getClient(baseUrl).clearClipboard();
+}
+
+export async function requestAgentFiles(
+  baseUrl = defaultLocalAgentBaseUrl,
+  path = "uploads",
+  limit = 100
+): Promise<FileTransferEntry[]> {
+  const files = await getClient(baseUrl).listFiles(path, limit);
+  return Array.isArray(files) ? files : [];
+}
+
+export async function uploadAgentFile(
+  baseUrl = defaultLocalAgentBaseUrl,
+  file: File,
+  targetPath?: string
+): Promise<FileTransferUploadResponse> {
+  return getClient(baseUrl).uploadFile(file, targetPath);
+}
+
+export async function downloadAgentFile(
+  baseUrl = defaultLocalAgentBaseUrl,
+  fileId: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  return getClient(baseUrl).downloadFile(fileId, signal);
+}
+
+export async function deleteAgentFile(
+  baseUrl = defaultLocalAgentBaseUrl,
+  fileId: string
+): Promise<void> {
+  await getClient(baseUrl).deleteFile(fileId);
 }
 
 export async function approveFromToolbar(
@@ -319,22 +374,38 @@ export async function patchAgentSettings(
 }
 
 export async function takeScreenshot(
-  baseUrl = defaultLocalAgentBaseUrl
+  baseUrl = defaultLocalAgentBaseUrl,
+  windowId?: string
 ): Promise<ScreenshotResponse> {
-  return getClient(baseUrl).screenshot();
+  return getClient(baseUrl).screenshot(windowId);
 }
 
 export async function startRecordingCapture(
   baseUrl = defaultLocalAgentBaseUrl,
-  confirmHighRisk = false
+  request: boolean | RecordingStartRequest = false
 ): Promise<RecordingStartResponse> {
-  return getClient(baseUrl).startRecording(confirmHighRisk);
+  return getClient(baseUrl).startRecording(request);
 }
 
 export async function stopRecordingCapture(
   baseUrl = defaultLocalAgentBaseUrl
 ): Promise<RecordingStopResponse> {
   return getClient(baseUrl).stopRecording();
+}
+
+export async function requestRecordings(
+  baseUrl = defaultLocalAgentBaseUrl,
+  limit = 100
+): Promise<RecordingListResponse> {
+  return getClient(baseUrl).listRecordings(limit);
+}
+
+export async function downloadRecording(
+  baseUrl: string,
+  fileName: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  return getClient(baseUrl).downloadRecording(fileName, signal);
 }
 
 export async function startLocalAgent(): Promise<AgentManagementResponse> {

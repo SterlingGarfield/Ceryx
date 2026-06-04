@@ -189,6 +189,15 @@ async function renderConsole() {
       });
     }
 
+    if (url.endsWith("/api/v1/clipboard/send")) {
+      return mockJson({
+        ok: true,
+        type: "text",
+        mimeType: "text/plain",
+        sizeBytes: 22
+      });
+    }
+
     if (url.endsWith("/api/v1/input/key")) {
       return mockJson({
         ok: true,
@@ -304,6 +313,13 @@ describe("desktop console shortcuts and context-menu", () => {
     fetchMock.mockClear();
     fireEvent.keyDown(window, { key: "S", ctrlKey: true, shiftKey: true });
     await waitForActionCycle(fetchMock, "/api/v1/media/screenshot");
+
+    fetchMock.mockClear();
+    fireEvent.keyDown(window, { key: "V", ctrlKey: true, shiftKey: true });
+    await waitForActionCycle(fetchMock, "/api/v1/clipboard/send");
+    await waitFor(() =>
+      expect(screen.getByText(/Clipboard sent to Windows/)).toBeInTheDocument()
+    );
 
     fireEvent.keyDown(window, { key: "C", ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(writeText).toHaveBeenCalled());

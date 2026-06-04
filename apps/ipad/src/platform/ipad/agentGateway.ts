@@ -12,7 +12,10 @@ import {
   type CaptureSignalResponse,
   type CaptureMode,
   type CaptureStateResponse,
+  type CodexWindowListResponse,
+  type CodexSelectWindowRequest,
   type CodexWindowSnapshot,
+  type FileTransferEntry,
   type InputActionResponse,
   type LogsQuery,
   type LogsResponse,
@@ -29,12 +32,15 @@ import {
   type PairingRequestResponse,
   type ProjectDiffResponse,
   type PromptSendResponse,
+  type RecordingListResponse,
+  type RecordingStartRequest,
   type RecordingStartResponse,
   type RecordingStopResponse,
   type SettingsResponse,
   type ScreenshotResponse,
   type TrustedDevice,
   type PairingRequestRejectedResponse,
+  type FileTransferUploadResponse,
   type UploadImageResponse
 } from "@ceryx/client-sdk";
 import {
@@ -156,25 +162,42 @@ export async function getCodexWindow(baseUrl: string): Promise<CodexWindowSnapsh
   return createClient(baseUrl).getCodexWindow();
 }
 
+export async function listCodexWindows(baseUrl: string): Promise<CodexWindowListResponse> {
+  return createClient(baseUrl).listCodexWindows();
+}
+
 export async function refreshCodexWindow(baseUrl: string): Promise<CodexWindowSnapshot> {
   return createClient(baseUrl).refreshCodexWindow();
+}
+
+export async function selectCodexWindow(
+  baseUrl: string,
+  windowId: string
+): Promise<CodexWindowSnapshot> {
+  const request: CodexSelectWindowRequest = { windowId };
+  return createClient(baseUrl).selectCodexWindow(request);
 }
 
 export async function getCaptureState(baseUrl: string): Promise<CaptureStateResponse> {
   return createClient(baseUrl).getCaptureState();
 }
 
-export async function getCaptureFrame(baseUrl: string): Promise<CaptureFrameResult> {
-  return createClient(baseUrl).getCaptureFrame();
+export async function getCaptureFrame(
+  baseUrl: string,
+  windowId?: string
+): Promise<CaptureFrameResult> {
+  return createClient(baseUrl).getCaptureFrame(windowId);
 }
 
 export async function startCapture(
   baseUrl: string,
-  mode: CaptureMode = "balanced"
+  mode: CaptureMode = "balanced",
+  windowId?: string
 ): Promise<CaptureStateResponse> {
   return createClient(baseUrl).startCapture({
     mode,
-    target: "codex_window"
+    target: "codex_window",
+    windowId
   });
 }
 
@@ -209,6 +232,38 @@ export async function receiveClipboard(baseUrl: string): Promise<ClipboardReceiv
 
 export async function clearClipboard(baseUrl: string): Promise<ClipboardClearResponse> {
   return createClient(baseUrl).clearClipboard();
+}
+
+export async function requestAgentFiles(
+  baseUrl: string,
+  path = "uploads",
+  limit = 100
+): Promise<FileTransferEntry[]> {
+  const files = await createClient(baseUrl).listFiles(path, limit);
+  return Array.isArray(files) ? files : [];
+}
+
+export async function uploadAgentFile(
+  baseUrl: string,
+  file: File,
+  targetPath?: string
+): Promise<FileTransferUploadResponse> {
+  return createClient(baseUrl).uploadFile(file, targetPath);
+}
+
+export async function downloadAgentFile(
+  baseUrl: string,
+  fileId: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  return createClient(baseUrl).downloadFile(fileId, signal);
+}
+
+export async function deleteAgentFile(
+  baseUrl: string,
+  fileId: string
+): Promise<void> {
+  await createClient(baseUrl).deleteFile(fileId);
 }
 
 export async function requestDiff(baseUrl: string): Promise<ProjectDiffResponse> {
@@ -284,19 +339,37 @@ export async function patchAgentSettings(
   return createClient(baseUrl).patchAgentSettings(patch, confirmHighRisk);
 }
 
-export async function takeScreenshot(baseUrl: string): Promise<ScreenshotResponse> {
-  return createClient(baseUrl).screenshot();
+export async function takeScreenshot(
+  baseUrl: string,
+  windowId?: string
+): Promise<ScreenshotResponse> {
+  return createClient(baseUrl).screenshot(windowId);
 }
 
 export async function startRecordingCapture(
   baseUrl: string,
-  confirmHighRisk = false
+  request: boolean | RecordingStartRequest = false
 ): Promise<RecordingStartResponse> {
-  return createClient(baseUrl).startRecording(confirmHighRisk);
+  return createClient(baseUrl).startRecording(request);
 }
 
 export async function stopRecordingCapture(baseUrl: string): Promise<RecordingStopResponse> {
   return createClient(baseUrl).stopRecording();
+}
+
+export async function requestRecordings(
+  baseUrl: string,
+  limit = 100
+): Promise<RecordingListResponse> {
+  return createClient(baseUrl).listRecordings(limit);
+}
+
+export async function downloadRecording(
+  baseUrl: string,
+  fileName: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  return createClient(baseUrl).downloadRecording(fileName, signal);
 }
 
 export async function sendMouseInput(

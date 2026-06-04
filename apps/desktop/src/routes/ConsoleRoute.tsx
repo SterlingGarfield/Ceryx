@@ -4,6 +4,7 @@ import {
   normalizePreviewRefreshProfile,
   type CaptureFrameResult,
   type CaptureMode,
+  type CodexWindowSnapshot,
   type PreviewRefreshProfile
 } from "@ceryx/client-sdk";
 import type {
@@ -13,6 +14,8 @@ import type {
   AgentSettingsState,
   ClientSettingsState,
   LogsQuery,
+  FileTransferEntry,
+  RecordingEntryResponse,
   ProjectFileEntry,
   ProjectDiffFileEntry,
   ProjectDiffFileResponse,
@@ -22,7 +25,10 @@ import type {
 } from "@ceryx/client-sdk";
 import {
   CodexToolbar,
+  CodexWindowPipPreview,
+  CodexWindowSwitcher,
   PromptComposer,
+  RecordingPanel,
   RemoteViewport,
   defaultPermissionsForClient,
   hasPermission,
@@ -30,8 +36,23 @@ import {
   useConnectionStore,
   usePromptStore,
   useRemoteSessionStore,
+  createDefaultCustomShortcutProfile,
+  defaultShortcutDefinitions,
+  defaultShortcutProfiles,
+  normalizeShortcutBindings,
+  resolveShortcutProfile,
+  type RecordingMode,
   useViewportPreview,
   useWebRtcViewport
+} from "@ceryx/feature-remote-control";
+import {
+  detectShortcutConflicts,
+  normalizeShortcutCombo,
+  shortcutBindingsForProfile,
+  shortcutEventToCombo,
+  useKeyboardShortcuts,
+  type ShortcutActionId,
+  type ShortcutProfile
 } from "@ceryx/feature-remote-control";
 import { Button, Panel, StatusChip, Tooltip } from "@ceryx/ui";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -43,16 +64,23 @@ import {
   getCaptureFrame,
   getCaptureState,
   getCodexWindow,
+  listCodexWindows,
   probeLocalAgent,
   refreshCodexWindow,
+  selectCodexWindow,
   rejectFromToolbar,
   patchAgentSettings,
   sendCaptureSignal,
   clearNotifications,
+  deleteAgentFile,
+  downloadRecording,
   requestDiffFile,
   requestDiffFiles,
+  downloadAgentFile,
   requestLogs,
+  requestAgentFiles,
   requestNotifications,
+  requestRecordings,
   requestProjectFiles,
   requestProjectTasks,
   requestProjectTest,
@@ -61,6 +89,7 @@ import {
   receiveClipboard,
   sendClipboard,
   sendPrompt,
+  uploadAgentFile,
   startCapture,
   startRecordingCapture,
   stopCapture,
@@ -139,10 +168,18 @@ export function ConsoleRoute() {
   const remoteSession = useRemoteSessionStore();
   const viewportShellRef = useRef<HTMLDivElement | null>(null);
   const viewportMenuRef = useRef<HTMLDivElement | null>(null);
+  const recordingPreviewUrlRef = useRef<string | null>(null);
   const [codexTitle, setCodexTitle] = useState("Codex window not loaded");
   const [codexStatus, setCodexStatus] = useState("not_found");
   const [viewportMessage, setViewportMessage] = useState("Refreshing local Agent state...");
   const [recordingActive, setRecordingActive] = useState(false);
+  const [recordingAudioActive, setRecordingAudioActive] = useState(false);
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>("screen");
+  const [recordings, setRecordings] = useState<RecordingEntryResponse[]>([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(false);
+  const [recordingsError, setRecordingsError] = useState("");
+  const [selectedRecordingFileName, setSelectedRecordingFileName] = useState<string | null>(null);
+  const [selectedRecordingUrl, setSelectedRecordingUrl] = useState<string | null>(null);
   const [toolbarBusy, setToolbarBusy] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [tokenState, setTokenState] = useState<"missing" | "valid" | "invalid" | "expired">("missing");
@@ -182,16 +219,31 @@ export function ConsoleRoute() {
   const [settingsNotice, setSettingsNotice] = useState("");
   const [settingsNeedsConfirm, setSettingsNeedsConfirm] = useState(false);
   const [settingsHighRiskKeys, setSettingsHighRiskKeys] = useState<string[]>([]);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const [shortcutRecordingAction, setShortcutRecordingAction] = useState<ShortcutActionId | null>(null);
+  const [shortcutEditorError, setShortcutEditorError] = useState("");
   const [settingsUpdatedAt, setSettingsUpdatedAt] = useState("");
   const [agentSettingsSource, setAgentSettingsSource] = useState<AgentSettingsState | null>(null);
   const [agentSettingsDraft, setAgentSettingsDraft] = useState<AgentSettingsState | null>(null);
   const [clientSettingsSource, setClientSettingsSource] = useState<ClientSettingsState | null>(null);
   const [clientSettingsDraft, setClientSettingsDraft] = useState<ClientSettingsState | null>(null);
+  const [codexWindows, setCodexWindows] = useState<CodexWindowSnapshot[]>([]);
+  const [codexWindowsLoading, setCodexWindowsLoading] = useState(false);
+  const [codexWindowsError, setCodexWindowsError] = useState("");
+  const [windowPreviewUrls, setWindowPreviewUrls] = useState<Record<string, string>>({});
+  const [pipDismissedWindowIds, setPipDismissedWindowIds] = useState<string[]>([]);
   const [filesQuery, setFilesQuery] = useState("");
   const [projectFiles, setProjectFiles] = useState<ProjectFileEntry[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState("");
   const [filesPermissionDenied, setFilesPermissionDenied] = useState(false);
+  const [transferFile, setTransferFile] = useState<File | null>(null);
+  const [transferTargetPath, setTransferTargetPath] = useState("uploads");
+  const [transferUploading, setTransferUploading] = useState(false);
+  const [agentFiles, setAgentFiles] = useState<FileTransferEntry[]>([]);
+  const [agentFilesLoading, setAgentFilesLoading] = useState(false);
+  const [agentFilesError, setAgentFilesError] = useState("");
+  const [agentFilesPermissionDenied, setAgentFilesPermissionDenied] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState("");
   const [tasksPermissionDenied, setTasksPermissionDenied] = useState(false);
@@ -258,7 +310,39 @@ export function ConsoleRoute() {
     return resolved.message;
   }
 
+  function resolveActiveWindowId(windowList: CodexWindowSnapshot[] = codexWindows): string | null {
+    const windows = Array.isArray(windowList) ? windowList : [];
+    const focusedWindow = windows.find((window) => window.status === "focused");
+    const windowId = remoteSession.captureState.windowId?.trim() || focusedWindow?.windowId?.trim() || windows[0]?.windowId?.trim();
+    return windowId && windowId.length > 0 ? windowId : null;
+  }
+
+  async function captureWindowPreviews(windowList: CodexWindowSnapshot[]): Promise<Record<string, string>> {
+    const previewEntries = await Promise.allSettled(
+      windowList
+        .map((window) => window.windowId?.trim())
+        .filter((windowId): windowId is string => Boolean(windowId))
+        .map(async (windowId) => {
+          const frame = await getCaptureFrame(defaultLocalAgentBaseUrl, windowId);
+          return [windowId, URL.createObjectURL(frame.blob)] as const;
+        })
+    );
+
+    const nextPreviewUrls: Record<string, string> = {};
+    for (const entry of previewEntries) {
+      if (entry.status === "fulfilled") {
+        const [windowId, previewUrl] = entry.value;
+        nextPreviewUrls[windowId] = previewUrl;
+      }
+    }
+
+    return nextPreviewUrls;
+  }
+
   async function refreshConsole() {
+    setCodexWindowsLoading(true);
+    setCodexWindowsError("");
+
     const probe = await probeLocalAgent(defaultLocalAgentBaseUrl);
     const canControl = probe.reachable && !!probe.agentStatus;
     const permissions = canControl ? defaultPermissionsForClient("desktop") : [];
@@ -278,19 +362,34 @@ export function ConsoleRoute() {
       setCodexStatus(probe.reachable ? "unpaired" : "not_found");
       setCodexTitle(probe.reachable ? "Pairing required" : "Local Agent offline");
       setViewportMessage(probe.message);
+      setCodexWindows([]);
+      setWindowPreviewUrls({});
+      setPipDismissedWindowIds([]);
+      setCodexWindowsLoading(false);
       return;
     }
 
     try {
-      const [windowSnapshot, captureState] = await Promise.all([
+      const [windowSnapshot, captureState, windowList] = await Promise.all([
         getCodexWindow(defaultLocalAgentBaseUrl),
-        getCaptureState(defaultLocalAgentBaseUrl)
+        getCaptureState(defaultLocalAgentBaseUrl),
+        listCodexWindows(defaultLocalAgentBaseUrl)
       ]);
       setCodexTitle(windowSnapshot.title ?? "Codex");
       setCodexStatus(windowSnapshot.status);
       remoteSession.setCaptureState(captureState);
       remoteSession.setPermissions(permissions);
       remoteSession.markActive();
+      setCodexWindows(windowList.windows);
+      setPipDismissedWindowIds((current) =>
+        current.filter((windowId) => windowList.windows.some((window) => window.windowId === windowId))
+      );
+      if (captureState.active) {
+        setWindowPreviewUrls(await captureWindowPreviews(windowList.windows));
+      } else {
+        setWindowPreviewUrls({});
+      }
+      setCodexWindowsError("");
       setViewportMessage(
         captureState.active
           ? "Waiting for real frame..."
@@ -299,7 +398,13 @@ export function ConsoleRoute() {
     } catch (error) {
       const message = applyConsoleError(error, "Unable to fetch Codex window or capture state.");
       remoteSession.setError(message);
+      setCodexWindows([]);
+      setWindowPreviewUrls({});
+      setPipDismissedWindowIds([]);
+      setCodexWindowsError(message);
       setViewportMessage(message);
+    } finally {
+      setCodexWindowsLoading(false);
     }
   }
 
@@ -311,6 +416,21 @@ export function ConsoleRoute() {
     () => remoteSession.status !== "idle" && remoteSession.status !== "error",
     [remoteSession.status]
   );
+
+  useEffect(() => {
+    if (!connected) {
+      setRecordingActive(false);
+      setRecordingAudioActive(false);
+      setRecordingsLoading(false);
+      setRecordings([]);
+      setRecordingsError("");
+      clearRecordingPreview();
+      return;
+    }
+
+    void loadRecordings();
+  }, [connected]);
+
   const previewRefreshProfile = normalizePreviewRefreshProfile(
     clientSettingsDraft?.previewRefreshProfile ??
       clientSettingsSource?.previewRefreshProfile ??
@@ -362,6 +482,18 @@ export function ConsoleRoute() {
     previewError: viewportPreview.lastError,
     statusMessage: viewportMessage
   });
+  const activeWindowId = resolveActiveWindowId();
+  const previewWindows = Array.isArray(codexWindows) ? codexWindows : [];
+  const pipWindow = previewWindows.find((window) => {
+    const windowId = window.windowId?.trim();
+    if (!windowId) {
+      return false;
+    }
+
+    return windowId !== activeWindowId && !pipDismissedWindowIds.includes(windowId);
+  });
+  const pipWindowId = pipWindow?.windowId?.trim() ?? null;
+  const pipPreviewUrl = pipWindowId ? windowPreviewUrls[pipWindowId] : null;
 
   useEffect(() => {
     if (!remoteSession.captureState.active) {
@@ -407,6 +539,48 @@ export function ConsoleRoute() {
     ? !equalClientSettings(clientSettingsSource ?? clientSettingsDraft, clientSettingsDraft)
     : false;
   const settingsDirty = settingsAgentDirty || settingsClientDirty;
+  const activeShortcutProfileId =
+    clientSettingsDraft?.activeShortcutProfile ??
+    clientSettingsSource?.activeShortcutProfile ??
+    "vscode-style";
+  const activeShortcutProfile = useMemo(
+    () =>
+      resolveShortcutProfile(
+        activeShortcutProfileId,
+        clientSettingsDraft?.customShortcuts ?? clientSettingsSource?.customShortcuts
+      ),
+    [
+      activeShortcutProfileId,
+      clientSettingsDraft?.customShortcuts,
+      clientSettingsSource?.customShortcuts
+    ]
+  );
+  const activeShortcutBindings = useMemo(
+    () => shortcutBindingsForProfile(activeShortcutProfile, defaultShortcutDefinitions),
+    [activeShortcutProfile]
+  );
+  const activeShortcutConflicts = useMemo(
+    () => detectShortcutConflicts(activeShortcutProfile.bindings),
+    [activeShortcutProfile.bindings]
+  );
+  const keyboardShortcutsEnabled =
+    connected && Boolean(clientSettingsDraft?.keyboardShortcuts ?? clientSettingsSource?.keyboardShortcuts);
+  const inputLockPreference =
+    clientSettingsDraft?.lockLocalInputWhenCapturing ??
+    clientSettingsSource?.lockLocalInputWhenCapturing ??
+    true;
+  const inputLockActive =
+    connected && remoteSession.captureState.active && Boolean(activeWindowId) && inputLockPreference;
+  function updateInputLockPreference(nextEnabled: boolean) {
+    setClientSettingsDraft((current) =>
+      current ? { ...current, lockLocalInputWhenCapturing: nextEnabled } : current
+    );
+  }
+
+  function isInputLockAllowedTarget(target: EventTarget | null): boolean {
+    return target instanceof Element && Boolean(target.closest("[data-input-lock-allow='true']"));
+  }
+
   const filteredDiffFiles = useMemo(() => {
     const query = diffSearchQuery.trim().toLowerCase();
     if (!query) {
@@ -442,6 +616,55 @@ export function ConsoleRoute() {
     return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, [viewportMenu]);
 
+  useEffect(() => {
+    return () => {
+      if (recordingPreviewUrlRef.current) {
+        URL.revokeObjectURL(recordingPreviewUrlRef.current);
+        recordingPreviewUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!inputLockActive) {
+      return;
+    }
+
+    const blockLocalInput = (event: Event) => {
+      if (isInputLockAllowedTarget(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    };
+
+    window.addEventListener("keydown", blockLocalInput, true);
+    window.addEventListener("pointerdown", blockLocalInput, true);
+    window.addEventListener("wheel", blockLocalInput, true);
+    window.addEventListener("paste", blockLocalInput, true);
+    window.addEventListener("dragstart", blockLocalInput, true);
+    window.addEventListener("drop", blockLocalInput, true);
+
+    return () => {
+      window.removeEventListener("keydown", blockLocalInput, true);
+      window.removeEventListener("pointerdown", blockLocalInput, true);
+      window.removeEventListener("wheel", blockLocalInput, true);
+      window.removeEventListener("paste", blockLocalInput, true);
+      window.removeEventListener("dragstart", blockLocalInput, true);
+      window.removeEventListener("drop", blockLocalInput, true);
+    };
+  }, [inputLockActive]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(windowPreviewUrls).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [windowPreviewUrls]);
+
   async function runToolbarAction(action: () => Promise<unknown>, successMessage?: string) {
     setToolbarBusy(true);
     try {
@@ -460,6 +683,26 @@ export function ConsoleRoute() {
     }
   }
 
+  async function selectWindow(windowId: string) {
+    await runToolbarAction(async () => {
+      const snapshot = await selectCodexWindow(defaultLocalAgentBaseUrl, windowId);
+      setCodexTitle(snapshot.title ?? "Codex");
+      setCodexStatus(snapshot.status);
+
+      if (remoteSession.captureState.active) {
+        const captureState = await startCapture(defaultLocalAgentBaseUrl, previewCaptureMode, windowId);
+        remoteSession.setCaptureState(captureState);
+        setViewportMessage("Waiting for real frame...");
+      } else {
+        setViewportMessage("Window selected. Start capture to load a live frame.");
+      }
+
+      return {
+        message: `Switched to ${snapshot.title ?? windowId}.`
+      };
+    });
+  }
+
   function openViewportMenu(position?: ViewportMenuState) {
     if (position) {
       setViewportMenu(position);
@@ -474,6 +717,11 @@ export function ConsoleRoute() {
   }
 
   async function handleSendPrompt(submit: boolean) {
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     let historyId = "";
 
     try {
@@ -500,18 +748,29 @@ export function ConsoleRoute() {
       if (recordingActive) {
         const response = await stopRecordingCapture(defaultLocalAgentBaseUrl);
         setRecordingActive(false);
+        setRecordingAudioActive(false);
+        await loadRecordings(response.fileName);
         return response;
       }
 
       const confirmed = typeof window === "undefined"
         ? true
-        : window.confirm("Start screen recording for current remote session?");
+        : window.confirm(
+            recordingMode === "screen-audio"
+              ? "Start screen recording with system audio for current remote session?"
+              : "Start screen recording for current remote session?"
+          );
       if (!confirmed) {
         throw new Error("Recording start canceled.");
       }
 
-      const response = await startRecordingCapture(defaultLocalAgentBaseUrl, true);
+      const response = await startRecordingCapture(defaultLocalAgentBaseUrl, {
+        confirmHighRisk: true,
+        includeAudio: recordingMode === "screen-audio",
+        audioSource: recordingMode === "screen-audio" ? "system" : undefined
+      });
       setRecordingActive(true);
+      setRecordingAudioActive(response.audioEnabled);
       return response;
     });
   }
@@ -521,11 +780,89 @@ export function ConsoleRoute() {
       if (recordingActive) {
         const response = await stopRecordingCapture(defaultLocalAgentBaseUrl);
         setRecordingActive(false);
+        setRecordingAudioActive(false);
+        await loadRecordings(response.fileName);
         return response;
       }
 
       return stopCapture(defaultLocalAgentBaseUrl);
     }, "Stopped active session control.");
+  }
+
+  async function loadRecordings(preferredFileName?: string | null) {
+    setRecordingsLoading(true);
+    setRecordingsError("");
+
+    try {
+      const response = await requestRecordings(defaultLocalAgentBaseUrl, 100);
+      setRecordings(response.items);
+
+      const candidate =
+        preferredFileName ??
+        selectedRecordingFileName ??
+        response.items[0]?.fileName ??
+        null;
+      if (!candidate) {
+        clearRecordingPreview();
+        return;
+      }
+
+      const nextSelection = response.items.some((item) => item.fileName === candidate)
+        ? candidate
+        : response.items[0]?.fileName ?? null;
+      if (!nextSelection) {
+        clearRecordingPreview();
+        return;
+      }
+
+      await previewRecording(nextSelection);
+    } catch (error) {
+      setRecordingsError(resolveErrorMessage(error, "Failed to load recordings."));
+    } finally {
+      setRecordingsLoading(false);
+    }
+  }
+
+  async function previewRecording(fileName: string) {
+    setRecordingsError("");
+
+    try {
+      const blob = await downloadRecording(defaultLocalAgentBaseUrl, fileName);
+      const previewUrl = URL.createObjectURL(blob);
+      if (recordingPreviewUrlRef.current) {
+        URL.revokeObjectURL(recordingPreviewUrlRef.current);
+      }
+      recordingPreviewUrlRef.current = previewUrl;
+      setSelectedRecordingFileName(fileName);
+      setSelectedRecordingUrl(previewUrl);
+    } catch (error) {
+      setRecordingsError(resolveErrorMessage(error, "Failed to load recording preview."));
+    }
+  }
+
+  function clearRecordingPreview() {
+    if (recordingPreviewUrlRef.current) {
+      URL.revokeObjectURL(recordingPreviewUrlRef.current);
+      recordingPreviewUrlRef.current = null;
+    }
+    setSelectedRecordingFileName(null);
+    setSelectedRecordingUrl(null);
+  }
+
+  async function downloadRecordingFile(fileName: string) {
+    try {
+      const blob = await downloadRecording(defaultLocalAgentBaseUrl, fileName);
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = fileName;
+      anchor.rel = "noreferrer";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      setFeedback(`Downloaded recording ${fileName}.`);
+    } catch (error) {
+      setRecordingsError(resolveErrorMessage(error, "Failed to download recording."));
+    }
   }
 
   async function loadDiffFiles(projectId = diffProjectId) {
@@ -665,9 +1002,146 @@ export function ConsoleRoute() {
     }
   }
 
-  async function openSettingsWorkspace() {
+  async function openSettingsWorkspace(section: DesktopSettingsSectionId = "general") {
     setWorkspaceMode("settings");
+    setSettingsSection(section);
     await loadSettingsState();
+  }
+
+  function resolveEditableShortcutProfile(): ShortcutProfile {
+    if (!clientSettingsDraft) {
+      return createDefaultCustomShortcutProfile(defaultShortcutProfiles["vscode-style"]);
+    }
+
+    return resolveShortcutProfile(
+      clientSettingsDraft.activeShortcutProfile ?? "vscode-style",
+      clientSettingsDraft.customShortcuts
+    );
+  }
+
+  function updateClientShortcutDraft(nextProfile: ShortcutProfile, activeProfileId = "custom") {
+    setClientSettingsDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        activeShortcutProfile: activeProfileId,
+        customShortcuts: nextProfile
+      };
+    });
+  }
+
+  function switchShortcutProfile(profileId: string) {
+    setShortcutEditorError("");
+
+    if (!clientSettingsDraft) {
+      return;
+    }
+
+    if (profileId === "custom") {
+      const currentProfile = resolveEditableShortcutProfile();
+      updateClientShortcutDraft(
+        {
+          id: "custom",
+          name: "Custom",
+          bindings: { ...currentProfile.bindings }
+        },
+        "custom"
+      );
+      return;
+    }
+
+    const preset = defaultShortcutProfiles[profileId as keyof typeof defaultShortcutProfiles];
+    if (!preset) {
+      return;
+    }
+
+    setClientSettingsDraft((current) =>
+      current
+        ? {
+            ...current,
+            activeShortcutProfile: preset.id,
+            customShortcuts: {
+              id: "custom",
+              name: "Custom",
+              bindings: { ...preset.bindings }
+            }
+          }
+        : current
+    );
+  }
+
+  function resetShortcutProfile() {
+    const preset = defaultShortcutProfiles["vscode-style"];
+    setShortcutEditorError("");
+    setClientSettingsDraft((current) =>
+      current
+        ? {
+            ...current,
+            activeShortcutProfile: preset.id,
+            customShortcuts: {
+              id: "custom",
+              name: "Custom",
+              bindings: { ...preset.bindings }
+            }
+          }
+        : current
+    );
+  }
+
+  function applyShortcutBinding(actionId: ShortcutActionId, combo: string) {
+    if (!clientSettingsDraft) {
+      return;
+    }
+
+    const normalizedCombo = normalizeShortcutCombo(combo);
+    if (!normalizedCombo) {
+      setShortcutEditorError("Shortcut cannot be empty.");
+      return;
+    }
+
+    const currentProfile = resolveEditableShortcutProfile();
+    const nextProfile: ShortcutProfile = {
+      id: "custom",
+      name: "Custom",
+      bindings: {
+        ...currentProfile.bindings,
+        [actionId]: normalizedCombo
+      }
+    };
+
+    const conflicts = detectShortcutConflicts(nextProfile.bindings);
+    const conflict = conflicts.find((entry) => entry.actionIds.includes(actionId));
+    if (conflict) {
+      setShortcutEditorError(`Conflict: ${conflict.combo} is already assigned to ${conflict.actionIds.join(", ")}.`);
+      return;
+    }
+
+    setShortcutEditorError("");
+    updateClientShortcutDraft(nextProfile, "custom");
+  }
+
+  function beginShortcutRecording(actionId: ShortcutActionId) {
+    if (!clientSettingsDraft) {
+      return;
+    }
+
+    setShortcutEditorError("");
+    if (clientSettingsDraft.activeShortcutProfile !== "custom") {
+      const currentProfile = resolveEditableShortcutProfile();
+      updateClientShortcutDraft(
+        {
+          id: "custom",
+          name: "Custom",
+          bindings: { ...currentProfile.bindings }
+        },
+        "custom"
+      );
+    }
+
+    setShortcutRecordingAction(actionId);
   }
 
   async function loadProjectFiles(query = filesQuery) {
@@ -696,9 +1170,82 @@ export function ConsoleRoute() {
     }
   }
 
+  async function loadAgentFiles(path = "uploads") {
+    setAgentFilesLoading(true);
+    setAgentFilesError("");
+    setAgentFilesPermissionDenied(false);
+    try {
+      const files = await requestAgentFiles(defaultLocalAgentBaseUrl, path, 100);
+      setAgentFiles(files);
+    } catch (error) {
+      if (error instanceof CeryxApiError && error.code === "E_PERMISSION_DENIED") {
+        setAgentFilesPermissionDenied(true);
+      }
+
+      setAgentFilesError(resolveErrorMessage(error, "Failed to load agent files."));
+      setAgentFiles([]);
+    } finally {
+      setAgentFilesLoading(false);
+    }
+  }
+
   async function openFilesWorkspace() {
     setWorkspaceMode("files");
-    await loadProjectFiles();
+    await Promise.all([loadProjectFiles(), loadAgentFiles()]);
+  }
+
+  async function uploadSelectedAgentFile() {
+    if (!transferFile) {
+      setAgentFilesError("Select a file before uploading.");
+      return;
+    }
+
+    setTransferUploading(true);
+    setAgentFilesError("");
+    try {
+      await uploadAgentFile(
+        defaultLocalAgentBaseUrl,
+        transferFile,
+        transferTargetPath.trim() ? transferTargetPath.trim() : undefined
+      );
+      setTransferFile(null);
+      await loadAgentFiles();
+    } catch (error) {
+      if (error instanceof CeryxApiError && error.code === "E_PERMISSION_DENIED") {
+        setAgentFilesPermissionDenied(true);
+      }
+
+      setAgentFilesError(resolveErrorMessage(error, "Failed to upload file."));
+    } finally {
+      setTransferUploading(false);
+    }
+  }
+
+  async function downloadSelectedAgentFile(file: FileTransferEntry) {
+    try {
+      const blob = await downloadAgentFile(defaultLocalAgentBaseUrl, file.fileId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file.fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setAgentFilesError(resolveErrorMessage(error, "Failed to download file."));
+    }
+  }
+
+  async function deleteSelectedAgentFile(file: FileTransferEntry) {
+    try {
+      await deleteAgentFile(defaultLocalAgentBaseUrl, file.fileId);
+      await loadAgentFiles();
+    } catch (error) {
+      if (error instanceof CeryxApiError && error.code === "E_PERMISSION_DENIED") {
+        setAgentFilesPermissionDenied(true);
+      }
+
+      setAgentFilesError(resolveErrorMessage(error, "Failed to delete file."));
+    }
   }
 
   async function loadProjectTasks() {
@@ -911,6 +1458,11 @@ export function ConsoleRoute() {
       return;
     }
 
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     setDraft(
       [
         `Explain the intent, risks, and validation plan for ${selectedDiff.path}.`,
@@ -933,6 +1485,11 @@ export function ConsoleRoute() {
   }
 
   async function handlePastePrompt() {
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     try {
       const text = await navigator.clipboard.readText();
       setDraft(text);
@@ -967,6 +1524,10 @@ export function ConsoleRoute() {
   }
 
   async function handleCopyFromWindowsClipboard() {
+    if (inputLockActive) {
+      return { message: "Local input is locked while capturing." };
+    }
+
     if (!navigator.clipboard) {
       return { message: "Local clipboard access is unavailable in this browser context." };
     }
@@ -998,6 +1559,11 @@ export function ConsoleRoute() {
   }
 
   function handleAskCodexToExplain() {
+    if (inputLockActive) {
+      setFeedback("Local input is locked while capturing.");
+      return;
+    }
+
     setDraft(
       [
         "Please explain the current Codex state, summarize the blocker, and propose the next minimal action.",
@@ -1026,13 +1592,128 @@ export function ConsoleRoute() {
     }
   }
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (toolbarBusy) {
+  useKeyboardShortcuts({
+    enabled: keyboardShortcutsEnabled && !toolbarBusy && !inputLockActive,
+    profileId: activeShortcutProfileId,
+    customProfile: clientSettingsDraft?.customShortcuts,
+    definitions: defaultShortcutDefinitions,
+    onAction(actionId) {
+      if (actionId === "input.prompt.send") {
+        if (!canControlInput) {
+          return;
+        }
+
+        void runToolbarAction(() => approveFromToolbar(defaultLocalAgentBaseUrl));
         return;
       }
 
-      const key = event.key.toLowerCase();
+      if (actionId === "navigation.diff") {
+        if (!canReadDiff) {
+          return;
+        }
+
+        void openDiffWorkspace();
+        return;
+      }
+
+      if (actionId === "navigation.logs") {
+        if (!connected) {
+          return;
+        }
+
+        void openLogsWorkspace();
+        return;
+      }
+
+      if (actionId === "media.screenshot") {
+        if (!canScreenshot) {
+          return;
+        }
+
+        void runToolbarAction(async () => {
+          const response = await takeScreenshot(defaultLocalAgentBaseUrl);
+          return { message: `Screenshot saved as ${response.fileName}.` };
+        });
+        return;
+      }
+
+      if (actionId === "clipboard.sendToWindows") {
+        if (!canManageAgent) {
+          return;
+        }
+
+        void runToolbarAction(() => handlePasteToWindowsClipboard());
+        return;
+      }
+
+      if (actionId === "window.focus") {
+        if (!canViewWindow) {
+          return;
+        }
+
+        void runToolbarAction(async () => {
+          const snapshot = await focusCodexWindow(defaultLocalAgentBaseUrl);
+          setCodexTitle(snapshot.title ?? "Codex");
+          setCodexStatus(snapshot.status);
+          return { message: "Codex window focused." };
+        });
+        return;
+      }
+
+      if (actionId === "capture.toggle") {
+        if (!canRecord) {
+          return;
+        }
+
+        void handleRecord();
+        return;
+      }
+
+      if (actionId === "navigation.settings") {
+        void openSettingsWorkspace("shortcuts");
+      }
+    },
+    onHelp: () => setShortcutHelpOpen((current) => !current),
+    shouldIgnoreEvent: (event) => shortcutRecordingAction !== null || isTypingContext(event.target)
+  });
+
+  useEffect(() => {
+    const recordingAction = shortcutRecordingAction;
+    if (!recordingAction) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      const lowerKey = event.key.toLowerCase();
+      if (["control", "shift", "alt", "meta"].includes(lowerKey)) {
+        return;
+      }
+
+      event.preventDefault();
+      if (event.key === "Escape") {
+        setShortcutEditorError("");
+        setShortcutRecordingAction(null);
+        return;
+      }
+
+      const combo = shortcutEventToCombo(event);
+      if (!combo) {
+        return;
+      }
+
+      applyShortcutBinding(recordingAction!, combo);
+      setShortcutRecordingAction(null);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [applyShortcutBinding, shortcutRecordingAction]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (toolbarBusy || shortcutRecordingAction !== null) {
+        return;
+      }
 
       if (
         workspaceMode === "diff" &&
@@ -1055,77 +1736,6 @@ export function ConsoleRoute() {
         }
       }
 
-      if (event.ctrlKey && event.key === "Enter" && canControlInput) {
-        event.preventDefault();
-        void runToolbarAction(() => approveFromToolbar(defaultLocalAgentBaseUrl));
-        return;
-      }
-
-      if (event.ctrlKey && key === "d" && canReadDiff) {
-        event.preventDefault();
-        void openDiffWorkspace();
-        return;
-      }
-
-      if (event.ctrlKey && key === "g" && connected) {
-        event.preventDefault();
-        void openLogsWorkspace();
-        return;
-      }
-
-      if (event.ctrlKey && key === "t" && canRunTest) {
-        event.preventDefault();
-        void runToolbarAction(async () => {
-          const response = await requestProjectTest(defaultLocalAgentBaseUrl);
-          return { message: response.message || "Test request submitted." };
-        });
-        return;
-      }
-
-      if (event.ctrlKey && key === "r" && canRecord) {
-        event.preventDefault();
-        void handleRecord();
-        return;
-      }
-
-      if (event.ctrlKey && event.shiftKey && key === "c" && canCopyOutput) {
-        event.preventDefault();
-        void handleCopyOutput();
-        return;
-      }
-
-      if (event.ctrlKey && event.shiftKey && key === "s" && canScreenshot) {
-        event.preventDefault();
-        void runToolbarAction(async () => {
-          const response = await takeScreenshot(defaultLocalAgentBaseUrl);
-          return { message: `Screenshot saved as ${response.fileName}.` };
-        });
-        return;
-      }
-
-      if (event.ctrlKey && event.shiftKey && key === "v" && canManageAgent) {
-        event.preventDefault();
-        void runToolbarAction(() => handlePasteToWindowsClipboard());
-        return;
-      }
-
-      if (event.ctrlKey && key === "l" && canViewWindow) {
-        event.preventDefault();
-        void runToolbarAction(async () => {
-          const snapshot = await focusCodexWindow(defaultLocalAgentBaseUrl);
-          setCodexTitle(snapshot.title ?? "Codex");
-          setCodexStatus(snapshot.status);
-          return { message: "Codex window focused." };
-        });
-        return;
-      }
-
-      if (event.ctrlKey && event.key === ",") {
-        event.preventDefault();
-        openViewportMenu();
-        return;
-      }
-
       if (!event.ctrlKey && !event.metaKey && event.key === "Escape" && canControlInput) {
         event.preventDefault();
         setViewportMenu(null);
@@ -1143,26 +1753,12 @@ export function ConsoleRoute() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     canControlInput,
-    canCopyOutput,
     canReadDiff,
-    connected,
-    workspaceMode,
-    diffFileLoading,
-    filteredDiffFiles,
-    selectedDiffPath,
-    diffProjectId,
-    canRecord,
-    canRunTest,
-    canScreenshot,
-    canViewWindow,
-    canManageAgent,
+    shortcutRecordingAction,
     toolbarBusy,
-    recordingActive,
-    remoteSession.status,
-    remoteSession.captureState.active,
-    viewportMessage,
-    codexTitle,
-    codexStatus
+    workspaceMode,
+    isTypingContext,
+    moveDiffSelection
   ]);
 
   return (
@@ -1174,6 +1770,7 @@ export function ConsoleRoute() {
       }}
     >
       <header
+        data-input-lock-allow="true"
         style={{
           alignItems: "center",
           backgroundColor: ceryxColors.surfaceContainerLow,
@@ -1188,6 +1785,9 @@ export function ConsoleRoute() {
           <StatusChip tone={connected ? "success" : "error"}>
             {connected ? "connected" : "offline"}
           </StatusChip>
+          <StatusChip tone={inputLockPreference ? "warning" : "neutral"}>
+            input lock: {inputLockPreference ? "on" : "off"}
+          </StatusChip>
         </div>
         <div style={{ alignItems: "center", display: "flex", gap: 10 }}>
           <TooltipIconButton label="Open viewport menu" onClick={() => openViewportMenu()}>
@@ -1199,7 +1799,7 @@ export function ConsoleRoute() {
         </div>
       </header>
 
-      <div style={{ padding: "14px 18px 0" }}>
+      <div data-input-lock-allow="true" style={{ padding: "14px 18px 0" }}>
         <CodexToolbar
           connected={connected}
           permissions={remoteSession.permissions}
@@ -1233,8 +1833,10 @@ export function ConsoleRoute() {
           onPasteToWindows={() =>
             void runToolbarAction(() => handlePasteToWindowsClipboard())
           }
-          onCopyFromWindows={() =>
-            void runToolbarAction(() => handleCopyFromWindowsClipboard())
+          onCopyFromWindows={
+            inputLockActive
+              ? undefined
+              : () => void runToolbarAction(() => handleCopyFromWindowsClipboard())
           }
         />
       </div>
@@ -1250,6 +1852,7 @@ export function ConsoleRoute() {
       >
         <aside
           data-testid="desktop-sidebar-shell"
+          data-input-lock-allow="true"
           style={{
             backgroundColor: ceryxColors.surfaceContainerLow,
             border: `1px solid ${ceryxColors.outlineVariant}`,
@@ -1352,7 +1955,8 @@ export function ConsoleRoute() {
         <div
           ref={viewportShellRef}
           data-testid="desktop-viewport-shell"
-          style={{ minWidth: 0 }}
+          data-input-lock-allow="true"
+          style={{ display: "grid", gap: 12, minWidth: 0 }}
           onContextMenu={(event) => {
             event.preventDefault();
             openViewportMenu({
@@ -1361,6 +1965,20 @@ export function ConsoleRoute() {
             });
           }}
         >
+          <CodexWindowSwitcher
+            size="desktop"
+            title="Codex Window Tabs"
+            variant="tabs"
+            windows={codexWindows}
+            activeWindowId={activeWindowId}
+            previewUrls={windowPreviewUrls}
+            loading={codexWindowsLoading}
+            error={codexWindowsError}
+            disabled={!connected}
+            onSelectWindow={(windowId) => void selectWindow(windowId)}
+            onRefresh={() => void refreshConsole()}
+          />
+
           <RemoteViewport
             deviceName={currentDevice?.deviceName ?? "Local Windows PC"}
             sessionStatus={remoteSession.status}
@@ -1392,7 +2010,7 @@ export function ConsoleRoute() {
               void runToolbarAction(async () => {
                 const response = remoteSession.captureState.active
                   ? await stopCapture(defaultLocalAgentBaseUrl)
-                  : await startCapture(defaultLocalAgentBaseUrl, previewCaptureMode);
+                  : await startCapture(defaultLocalAgentBaseUrl, previewCaptureMode, activeWindowId ?? undefined);
                 remoteSession.setCaptureState(response);
                 if (response.active) {
                   setViewportMessage("Waiting for real frame...");
@@ -1469,6 +2087,29 @@ export function ConsoleRoute() {
                   {webRtcViewport.stream ? "webrtc-live" : viewportPreview.capturedAt || "none"}
                 </div>
               </div>
+
+              {pipWindow ? (
+                <CodexWindowPipPreview
+                  size="desktop"
+                  window={pipWindow}
+                  activeWindowId={activeWindowId}
+                  previewUrl={pipPreviewUrl ?? undefined}
+                  onSelectWindow={(windowId) => void selectWindow(windowId)}
+                  onClose={() =>
+                    setPipDismissedWindowIds((current) =>
+                      current.includes(pipWindow.windowId ?? "")
+                        ? current
+                        : [...current, pipWindow.windowId ?? ""]
+                    )
+                  }
+                  style={{
+                    bottom: 16,
+                    position: "absolute",
+                    right: 16,
+                    zIndex: 2
+                  }}
+                />
+              ) : null}
             </div>
           </RemoteViewport>
         </div>
@@ -1531,6 +2172,24 @@ export function ConsoleRoute() {
             <div>Capture: {remoteSession.captureState.active ? "active" : "idle"}</div>
           </div>
 
+          <RecordingPanel
+            size="desktop"
+            connected={connected}
+            loading={recordingsLoading}
+            error={recordingsError}
+            recordingActive={recordingActive}
+            recordingAudioActive={recordingAudioActive}
+            recordingMode={recordingMode}
+            recordings={recordings}
+            selectedRecordingFileName={selectedRecordingFileName}
+            selectedRecordingUrl={selectedRecordingUrl}
+            onRecordingModeChange={setRecordingMode}
+            onToggleRecording={() => void handleRecord()}
+            onRefreshRecordings={() => void loadRecordings()}
+            onSelectRecording={(fileName) => void previewRecording(fileName)}
+            onDownloadRecording={(fileName) => void downloadRecordingFile(fileName)}
+          />
+
           {feedback ? (
             <Panel
               style={{
@@ -1551,7 +2210,7 @@ export function ConsoleRoute() {
           history={history}
           isSending={isSending}
           lastError={promptError}
-          disabled={!connected}
+          disabled={!connected || inputLockActive}
           onDraftChange={setDraft}
           onTemplateSelect={applyTemplate}
           onSend={(submit) => void handleSendPrompt(submit)}
@@ -1622,6 +2281,7 @@ export function ConsoleRoute() {
             }}
           >
             <header
+              data-input-lock-allow="true"
               style={{
                 alignItems: "center",
                 borderBottom: `1px solid ${ceryxColors.outlineVariant}`,
@@ -1798,7 +2458,7 @@ export function ConsoleRoute() {
                 <Button
                   size="desktop"
                   variant="secondary"
-                  disabled={!selectedDiff}
+                  disabled={!selectedDiff || inputLockActive}
                   onClick={() => askCodexToExplainDiff()}
                 >
                   Ask Codex to Explain
@@ -1806,9 +2466,14 @@ export function ConsoleRoute() {
                 <Button
                   size="desktop"
                   variant="secondary"
-                  disabled={!selectedDiff}
+                  disabled={!selectedDiff || inputLockActive}
                   onClick={() => {
                     if (!selectedDiff) {
+                      return;
+                    }
+
+                    if (inputLockActive) {
+                      setFeedback("Local input is locked while capturing.");
                       return;
                     }
 
@@ -1829,7 +2494,7 @@ export function ConsoleRoute() {
                 <Button
                   size="desktop"
                   variant="secondary"
-                  disabled={!selectedDiff}
+                  disabled={!selectedDiff || inputLockActive}
                   onClick={() => openSelectedDiffInCodex()}
                 >
                   Open in Codex
@@ -2063,10 +2728,13 @@ export function ConsoleRoute() {
                     ? "saving"
                     : settingsDirty
                       ? "unsaved"
-                      : settingsUpdatedAt
-                        ? `synced ${formatTimestamp(settingsUpdatedAt)}`
-                        : "synced"}
+                        : settingsUpdatedAt
+                          ? `synced ${formatTimestamp(settingsUpdatedAt)}`
+                          : "synced"}
                 </span>
+                <StatusChip tone={inputLockPreference ? "warning" : "neutral"}>
+                  input lock: {inputLockPreference ? "on" : "off"}
+                </StatusChip>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <Button
@@ -2076,6 +2744,14 @@ export function ConsoleRoute() {
                   onClick={() => void loadSettingsState()}
                 >
                   Refresh
+                </Button>
+                <Button
+                  size="desktop"
+                  variant="secondary"
+                  disabled={settingsLoading || settingsSaving || !clientSettingsDraft}
+                  onClick={() => updateInputLockPreference(!inputLockPreference)}
+                >
+                  {inputLockPreference ? "Unlock Input" : "Lock Input"}
                 </Button>
                 <Button
                   size="desktop"
@@ -2147,6 +2823,7 @@ export function ConsoleRoute() {
                           <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Theme</span>
                           <select
                             value={clientSettingsDraft.theme}
+                            disabled={inputLockActive}
                             onChange={(event) =>
                               setClientSettingsDraft((current) =>
                                 current ? { ...current, theme: event.target.value } : current
@@ -2162,6 +2839,7 @@ export function ConsoleRoute() {
                         <CheckboxRow
                           label="Compact mode"
                           checked={clientSettingsDraft.compactMode}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, compactMode: checked } : current
@@ -2171,11 +2849,18 @@ export function ConsoleRoute() {
                         <CheckboxRow
                           label="Show latency in inspector"
                           checked={clientSettingsDraft.showLatency}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, showLatency: checked } : current
                             )
                           }
+                        />
+                        <CheckboxRow
+                          label="Lock local input while capturing"
+                          checked={inputLockPreference}
+                          disabled={inputLockActive}
+                          onChange={(checked) => updateInputLockPreference(checked)}
                         />
                       </div>
                     ) : null}
@@ -2190,7 +2875,7 @@ export function ConsoleRoute() {
                             type="number"
                             min={1}
                             max={65535}
-                            disabled={!canManageAgent}
+                            disabled={!canManageAgent || inputLockActive}
                             onChange={(event) => {
                               const parsed = Number.parseInt(event.target.value, 10);
                               if (!Number.isFinite(parsed)) {
@@ -2211,7 +2896,7 @@ export function ConsoleRoute() {
                           <textarea
                             rows={4}
                             value={agentSettingsDraft.directTestCommand}
-                            disabled={!canManageAgent}
+                            disabled={!canManageAgent || inputLockActive}
                             onChange={(event) =>
                               setAgentSettingsDraft((current) =>
                                 current ? { ...current, directTestCommand: event.target.value } : current
@@ -2245,6 +2930,7 @@ export function ConsoleRoute() {
                         <CheckboxRow
                           label="Keyboard shortcuts enabled"
                           checked={clientSettingsDraft.keyboardShortcuts}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, keyboardShortcuts: checked } : current
@@ -2254,6 +2940,7 @@ export function ConsoleRoute() {
                         <CheckboxRow
                           label="Desktop notifications enabled"
                           checked={clientSettingsDraft.notificationsEnabled}
+                          disabled={inputLockActive}
                           onChange={(checked) =>
                             setClientSettingsDraft((current) =>
                               current ? { ...current, notificationsEnabled: checked } : current
@@ -2275,6 +2962,7 @@ export function ConsoleRoute() {
                           </span>
                           <select
                             value={normalizePreviewRefreshProfile(clientSettingsDraft.previewRefreshProfile)}
+                            disabled={inputLockActive}
                             onChange={(event) =>
                               setClientSettingsDraft((current) =>
                                 current
@@ -2297,6 +2985,7 @@ export function ConsoleRoute() {
                           </span>
                           <select
                             value={clientSettingsDraft.viewportTransport ?? defaultViewportTransport}
+                            disabled={inputLockActive}
                             onChange={(event) =>
                               setClientSettingsDraft((current) =>
                                 current
@@ -2319,7 +3008,7 @@ export function ConsoleRoute() {
                           </span>
                           <select
                             value={agentSettingsDraft.defaultCaptureMode}
-                            disabled={!canManageAgent}
+                            disabled={!canManageAgent || inputLockActive}
                             onChange={(event) =>
                               setAgentSettingsDraft((current) =>
                                 current ? { ...current, defaultCaptureMode: event.target.value } : current
@@ -2335,7 +3024,7 @@ export function ConsoleRoute() {
                         <CheckboxRow
                           label="Allow full-screen capture"
                           checked={agentSettingsDraft.allowFullscreenCapture}
-                          disabled={!canManageAgent}
+                          disabled={!canManageAgent || inputLockActive}
                           onChange={(checked) =>
                             setAgentSettingsDraft((current) =>
                               current ? { ...current, allowFullscreenCapture: checked } : current
@@ -2346,24 +3035,30 @@ export function ConsoleRoute() {
                     ) : null}
 
                     {settingsSection === "shortcuts" ? (
-                      <div style={{ display: "grid", gap: 10 }}>
-                        <strong>Shortcuts</strong>
-                        <CheckboxRow
-                          label="Enable keyboard shortcuts"
-                          checked={clientSettingsDraft.keyboardShortcuts}
-                          onChange={(checked) =>
-                            setClientSettingsDraft((current) =>
-                              current ? { ...current, keyboardShortcuts: checked } : current
-                            )
-                          }
+                      <div style={{ display: "grid", gap: 14 }}>
+                        <div style={{ display: "grid", gap: 12 }}>
+                          <strong>Shortcuts</strong>
+                          <CheckboxRow
+                            label="Enable keyboard shortcuts"
+                            checked={clientSettingsDraft.keyboardShortcuts}
+                            onChange={(checked) =>
+                              setClientSettingsDraft((current) =>
+                                current ? { ...current, keyboardShortcuts: checked } : current
+                              )
+                            }
+                          />
+                        </div>
+
+                        <ShortcutProfileEditor
+                          profileId={activeShortcutProfileId}
+                          bindings={activeShortcutBindings}
+                          conflicts={activeShortcutConflicts}
+                          recordingAction={shortcutRecordingAction}
+                          error={shortcutEditorError}
+                          onProfileChange={switchShortcutProfile}
+                          onReset={resetShortcutProfile}
+                          onBeginRecording={beginShortcutRecording}
                         />
-                        <ul style={{ margin: 0, paddingInlineStart: 20 }}>
-                          <li>`Ctrl+D`: open Diff Workspace</li>
-                          <li>`Ctrl+G`: open Logs Workspace</li>
-                          <li>`Ctrl+T`: run project test request</li>
-                          <li>`Ctrl+Shift+S`: take screenshot</li>
-                          <li>`Ctrl+Shift+V`: paste local clipboard to Windows</li>
-                        </ul>
                       </div>
                     ) : null}
 
@@ -2514,44 +3209,145 @@ export function ConsoleRoute() {
               </Button>
             </div>
             <div style={{ minHeight: 0, overflow: "auto", padding: 12 }}>
-              <Panel style={{ display: "grid", gap: 10 }}>
-                {filesPermissionDenied ? (
-                  <div style={{ color: "#ffb4a8", fontSize: 13 }}>
-                    Permission denied. This workspace requires `read_diff`.
-                  </div>
-                ) : null}
-                {filesLoading ? <div>Loading project files...</div> : null}
-                {!filesLoading && !filesPermissionDenied && projectFiles.length === 0 ? (
-                  <div>No files found for the current filter.</div>
-                ) : null}
-                {!filesLoading && !filesPermissionDenied
-                  ? projectFiles.map((file) => (
-                      <div
-                        key={file.path}
-                        style={{
-                          alignItems: "center",
-                          border: `1px solid ${ceryxColors.outlineVariant}`,
-                          borderRadius: 8,
-                          display: "grid",
-                          gap: 8,
-                          gridTemplateColumns: "minmax(0, 1fr) auto auto",
-                          padding: "8px 10px"
-                        }}
-                      >
-                        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {file.path}
+              <div style={{ display: "grid", gap: 12 }}>
+                <Panel style={{ display: "grid", gap: 10 }}>
+                  {filesPermissionDenied ? (
+                    <div style={{ color: "#ffb4a8", fontSize: 13 }}>
+                      Permission denied. This workspace requires `read_diff`.
+                    </div>
+                  ) : null}
+                  {filesLoading ? <div>Loading project files...</div> : null}
+                  {!filesLoading && !filesPermissionDenied && projectFiles.length === 0 ? (
+                    <div>No files found for the current filter.</div>
+                  ) : null}
+                  {!filesLoading && !filesPermissionDenied
+                    ? projectFiles.map((file) => (
+                        <div
+                          key={file.path}
+                          style={{
+                            alignItems: "center",
+                            border: `1px solid ${ceryxColors.outlineVariant}`,
+                            borderRadius: 8,
+                            display: "grid",
+                            gap: 8,
+                            gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                            padding: "8px 10px"
+                          }}
+                        >
+                          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {file.path}
+                          </div>
+                          <StatusChip tone={file.changed ? "warning" : "neutral"}>
+                            {file.changed ? "changed" : "clean"}
+                          </StatusChip>
+                          <StatusChip tone={file.tracked ? "success" : "neutral"}>
+                            {file.tracked ? "tracked" : "untracked"}
+                          </StatusChip>
                         </div>
-                        <StatusChip tone={file.changed ? "warning" : "neutral"}>
-                          {file.changed ? "changed" : "clean"}
-                        </StatusChip>
-                        <StatusChip tone={file.tracked ? "success" : "neutral"}>
-                          {file.tracked ? "tracked" : "untracked"}
-                        </StatusChip>
-                      </div>
-                    ))
-                  : null}
-                {filesError ? <div style={{ color: "#ffb4a8", fontSize: 12 }}>{filesError}</div> : null}
-              </Panel>
+                      ))
+                    : null}
+                  {filesError ? <div style={{ color: "#ffb4a8", fontSize: 12 }}>{filesError}</div> : null}
+                </Panel>
+
+                <Panel data-testid="desktop-agent-file-transfer" style={{ display: "grid", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <strong>Agent File Transfers</strong>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Button
+                        size="desktop"
+                        variant="secondary"
+                        disabled={agentFilesLoading}
+                        onClick={() => void loadAgentFiles()}
+                      >
+                        Refresh Uploads
+                      </Button>
+                      <Button
+                        size="desktop"
+                        disabled={transferUploading || !transferFile}
+                        onClick={() => void uploadSelectedAgentFile()}
+                      >
+                        {transferUploading ? "Uploading..." : "Upload File"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setTransferFile(event.dataTransfer.files?.[0] ?? null);
+                    }}
+                    style={{
+                      alignItems: "center",
+                      border: `1px dashed ${ceryxColors.outlineVariant}`,
+                      borderRadius: 10,
+                      display: "grid",
+                      gap: 8,
+                      padding: 12
+                    }}
+                  >
+                    <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 13 }}>
+                      Drop a file here or choose one below. Files up to 100 MB are supported.
+                    </div>
+                    <input
+                      aria-label="Transfer file input"
+                      onChange={(event) => setTransferFile(event.target.files?.[0] ?? null)}
+                      type="file"
+                    />
+                    <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 13 }}>
+                      {transferFile ? `Selected: ${transferFile.name}` : "No file selected."}
+                    </div>
+                    <input
+                      aria-label="Transfer target path"
+                      value={transferTargetPath}
+                      onChange={(event) => setTransferTargetPath(event.target.value)}
+                      placeholder="Target path (optional)"
+                      style={fieldStyle}
+                    />
+                  </div>
+                  {agentFilesPermissionDenied ? (
+                    <div style={{ color: "#ffb4a8", fontSize: 13 }}>
+                      Permission denied. This workspace requires `manage_agent`.
+                    </div>
+                  ) : null}
+                  {agentFilesLoading ? <div>Loading agent files...</div> : null}
+                  {!agentFilesLoading && !agentFilesPermissionDenied && agentFiles.length === 0 ? (
+                    <div>No uploaded files yet.</div>
+                  ) : null}
+                  {!agentFilesLoading && !agentFilesPermissionDenied
+                    ? agentFiles.map((file) => (
+                        <div
+                          key={file.fileId}
+                          data-testid={`desktop-agent-file-${file.fileId}`}
+                          style={{
+                            border: `1px solid ${ceryxColors.outlineVariant}`,
+                            borderRadius: 8,
+                            display: "grid",
+                            gap: 8,
+                            gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                            padding: "8px 10px"
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{file.fileName}</div>
+                            <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+                              {file.mimeType} · {file.sizeBytes} bytes
+                            </div>
+                            <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+                              Uploaded {new Date(file.uploadedAt).toLocaleString()}
+                            </div>
+                          </div>
+                          <Button size="desktop" variant="secondary" onClick={() => void downloadSelectedAgentFile(file)}>
+                            Download
+                          </Button>
+                          <Button size="desktop" variant="ghost" onClick={() => void deleteSelectedAgentFile(file)}>
+                            Delete
+                          </Button>
+                        </div>
+                      ))
+                    : null}
+                  {agentFilesError ? <div style={{ color: "#ffb4a8", fontSize: 12 }}>{agentFilesError}</div> : null}
+                </Panel>
+              </div>
             </div>
           </section>
         </div>
@@ -2786,9 +3582,18 @@ export function ConsoleRoute() {
         </div>
       ) : null}
 
+      {shortcutHelpOpen ? (
+        <ShortcutHelpOverlay
+          bindings={activeShortcutBindings}
+          profileName={activeShortcutProfile.name}
+          onClose={() => setShortcutHelpOpen(false)}
+        />
+      ) : null}
+
       {viewportMenu ? (
         <div
           ref={viewportMenuRef}
+          data-input-lock-allow="true"
           style={{
             left: `${Math.max(16, viewportMenu.x)}px`,
             position: "fixed",
@@ -2806,10 +3611,20 @@ export function ConsoleRoute() {
             <Button size="desktop" variant="ghost" onClick={() => void handleCopyOutput()}>
               Copy Output
             </Button>
-            <Button size="desktop" variant="ghost" onClick={() => void handlePastePrompt()}>
+            <Button
+              size="desktop"
+              variant="ghost"
+              disabled={inputLockActive}
+              onClick={() => void handlePastePrompt()}
+            >
               Paste Prompt
             </Button>
-            <Button size="desktop" variant="ghost" onClick={handleAskCodexToExplain}>
+            <Button
+              size="desktop"
+              variant="ghost"
+              disabled={inputLockActive}
+              onClick={handleAskCodexToExplain}
+            >
               Ask Codex to Explain
             </Button>
             <Button
@@ -2989,18 +3804,40 @@ function equalAgentSettings(a: AgentSettingsState, b: AgentSettingsState): boole
   );
 }
 
+function resolveClientShortcutProfileState(settings: ClientSettingsState): ShortcutProfile {
+  return resolveShortcutProfile(
+    settings.activeShortcutProfile ?? "vscode-style",
+    settings.customShortcuts
+  );
+}
+
+function equalShortcutProfiles(a: ShortcutProfile, b: ShortcutProfile): boolean {
+  if (a.id !== b.id) {
+    return false;
+  }
+
+  return defaultShortcutDefinitions.every(
+    (definition) => (a.bindings[definition.id] ?? "") === (b.bindings[definition.id] ?? "")
+  );
+}
+
 function equalClientSettings(a: ClientSettingsState, b: ClientSettingsState): boolean {
+  const aShortcutProfile = resolveClientShortcutProfileState(a);
+  const bShortcutProfile = resolveClientShortcutProfileState(b);
   return (
     a.theme === b.theme &&
     a.compactMode === b.compactMode &&
     a.showLatency === b.showLatency &&
+    (a.clipboardAutoSync ?? false) === (b.clipboardAutoSync ?? false) &&
+    (a.lockLocalInputWhenCapturing ?? true) === (b.lockLocalInputWhenCapturing ?? true) &&
     a.keyboardShortcuts === b.keyboardShortcuts &&
     a.notificationsEnabled === b.notificationsEnabled &&
     a.logsAutoRefresh === b.logsAutoRefresh &&
     normalizePreviewRefreshProfile(a.previewRefreshProfile) ===
       normalizePreviewRefreshProfile(b.previewRefreshProfile) &&
     (a.viewportTransport ?? defaultViewportTransport) ===
-      (b.viewportTransport ?? defaultViewportTransport)
+      (b.viewportTransport ?? defaultViewportTransport) &&
+    equalShortcutProfiles(aShortcutProfile, bShortcutProfile)
   );
 }
 
@@ -3111,13 +3948,29 @@ function readClientSettingsSnapshot(
 
   try {
     const parsed = JSON.parse(raw) as Partial<ClientSettingsState>;
+    const activeShortcutProfile =
+      typeof parsed.activeShortcutProfile === "string"
+        ? parsed.activeShortcutProfile
+        : (fallback.activeShortcutProfile ?? "vscode-style");
+    const customShortcutsSource = parsed.customShortcuts ?? fallback.customShortcuts;
     return {
       theme: parsed.theme ?? fallback.theme,
       compactMode: parsed.compactMode ?? fallback.compactMode,
       showLatency: parsed.showLatency ?? fallback.showLatency,
+      clipboardAutoSync: parsed.clipboardAutoSync ?? fallback.clipboardAutoSync ?? false,
+      lockLocalInputWhenCapturing:
+        parsed.lockLocalInputWhenCapturing ?? fallback.lockLocalInputWhenCapturing ?? true,
       keyboardShortcuts: parsed.keyboardShortcuts ?? fallback.keyboardShortcuts,
       notificationsEnabled: parsed.notificationsEnabled ?? fallback.notificationsEnabled,
       logsAutoRefresh: parsed.logsAutoRefresh ?? fallback.logsAutoRefresh,
+      activeShortcutProfile,
+      customShortcuts: customShortcutsSource
+        ? {
+            id: customShortcutsSource.id ?? "custom",
+            name: customShortcutsSource.name ?? "Custom",
+            bindings: normalizeShortcutBindings(customShortcutsSource.bindings ?? {})
+          }
+        : undefined,
       previewRefreshProfile: normalizePreviewRefreshProfile(
         parsed.previewRefreshProfile ?? fallback.previewRefreshProfile ?? defaultPreviewRefreshProfile
       ),
@@ -3191,4 +4044,198 @@ function writePersistedWidth(key: string, value: number): void {
   }
 
   window.localStorage.setItem(key, String(value));
+}
+
+function ShortcutProfileEditor({
+  profileId,
+  bindings,
+  conflicts,
+  recordingAction,
+  error,
+  onProfileChange,
+  onReset,
+  onBeginRecording
+}: {
+  profileId: string;
+  bindings: Record<ShortcutActionId, string>;
+  conflicts: Array<{ combo: string; actionIds: string[] }>;
+  recordingAction: ShortcutActionId | null;
+  error: string;
+  onProfileChange: (profileId: string) => void;
+  onReset: () => void;
+  onBeginRecording: (actionId: ShortcutActionId) => void;
+}) {
+  const profileOptions = [
+    { id: "vscode-style", label: defaultShortcutProfiles["vscode-style"].name },
+    { id: "jetbrains-style", label: defaultShortcutProfiles["jetbrains-style"].name },
+    { id: "minimal-style", label: defaultShortcutProfiles["minimal-style"].name },
+    { id: "custom", label: "Custom" }
+  ];
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <label style={{ display: "grid", gap: 4, maxWidth: 320 }}>
+        <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>Shortcut profile</span>
+        <select
+          aria-label="Shortcut profile"
+          value={profileId}
+          onChange={(event) => onProfileChange(event.target.value)}
+          style={fieldStyle}
+        >
+          {profileOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <Button size="desktop" variant="secondary" onClick={onReset}>
+          Reset to Default
+        </Button>
+      </div>
+
+      <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+        Press `?` for a quick overview. Recording mode accepts the next shortcut combo.
+      </div>
+
+      {error ? <div style={{ color: "#ffb4a8", fontSize: 12 }}>{error}</div> : null}
+      {conflicts.length > 0 ? (
+        <div style={{ color: "#ffb4a8", fontSize: 12 }}>
+          Conflicts detected:{" "}
+          {conflicts.map((conflict) => `${conflict.combo} (${conflict.actionIds.join(", ")})`).join("; ")}
+        </div>
+      ) : null}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {defaultShortcutDefinitions.map((definition) => {
+          const combo = bindings[definition.id as ShortcutActionId] ?? definition.defaultKeys;
+          const isRecording = recordingAction === definition.id;
+
+          return (
+            <div
+              key={definition.id}
+              style={{
+                alignItems: "center",
+                border: `1px solid ${ceryxColors.outlineVariant}`,
+                borderRadius: 10,
+                display: "grid",
+                gap: 8,
+                gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                padding: "10px 12px"
+              }}
+            >
+              <div style={{ display: "grid", gap: 2 }}>
+                <strong style={{ fontSize: 13 }}>{definition.label}</strong>
+                <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 11 }}>{definition.category}</span>
+              </div>
+              <code
+                style={{
+                  backgroundColor: ceryxColors.surfaceContainerLow,
+                  borderRadius: 6,
+                  color: ceryxColors.onSurface,
+                  fontSize: 12,
+                  padding: "6px 8px"
+                }}
+              >
+                {combo}
+              </code>
+              <Button
+                size="desktop"
+                variant={isRecording ? "primary" : "secondary"}
+                aria-label={`Record ${definition.label}`}
+                onClick={() => onBeginRecording(definition.id as ShortcutActionId)}
+              >
+                {isRecording ? "Recording..." : "Record"}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ShortcutHelpOverlay({
+  bindings,
+  profileName,
+  onClose
+}: {
+  bindings: Record<ShortcutActionId, string>;
+  profileName: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      data-testid="desktop-shortcut-help"
+      style={{
+        alignItems: "center",
+        backgroundColor: "rgba(16, 14, 12, 0.55)",
+        display: "grid",
+        inset: 0,
+        justifyItems: "center",
+        position: "fixed",
+        zIndex: 48
+      }}
+    >
+      <Panel
+        style={{
+          display: "grid",
+          gap: 12,
+          maxHeight: "min(84vh, 760px)",
+          maxWidth: 820,
+          overflow: "auto",
+          width: "min(92vw, 820px)"
+        }}
+      >
+        <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <strong style={{ fontSize: 16 }}>Keyboard Shortcut Help</strong>
+            <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+              Profile: {profileName}
+            </span>
+          </div>
+          <Button size="desktop" variant="ghost" onClick={onClose}>
+            Close help
+          </Button>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          {defaultShortcutDefinitions.map((definition) => (
+            <div
+              key={definition.id}
+              style={{
+                alignItems: "center",
+                border: `1px solid ${ceryxColors.outlineVariant}`,
+                borderRadius: 10,
+                display: "grid",
+                gap: 10,
+                gridTemplateColumns: "minmax(0, 1fr) auto",
+                padding: "10px 12px"
+              }}
+            >
+              <div style={{ display: "grid", gap: 2 }}>
+                <strong style={{ fontSize: 13 }}>{definition.label}</strong>
+                <span style={{ color: ceryxColors.onSurfaceVariant, fontSize: 11 }}>
+                  {definition.category}
+                </span>
+              </div>
+              <code
+                style={{
+                  backgroundColor: ceryxColors.surfaceContainerLow,
+                  borderRadius: 6,
+                  color: ceryxColors.onSurface,
+                  fontSize: 12,
+                  padding: "6px 8px"
+                }}
+              >
+                {bindings[definition.id as ShortcutActionId] ?? definition.defaultKeys}
+              </code>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
 }

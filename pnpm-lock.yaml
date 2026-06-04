@@ -35,6 +35,9 @@ importers:
       '@ceryx/feature-remote-control':
         specifier: workspace:^
         version: link:../../packages/feature-remote-control
+      '@ceryx/protocol':
+        specifier: workspace:^
+        version: link:../../packages/protocol
       '@ceryx/ui':
         specifier: workspace:*
         version: link:../../packages/ui

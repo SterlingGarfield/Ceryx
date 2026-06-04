@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Ceryx.Agent.Codex.Clipboard;
 using Ceryx.Agent.Codex.WindowLocator;
 using Ceryx.Agent.Core;
 using Ceryx.Agent.Media;
@@ -48,6 +49,30 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
 
         var refresh = await viewer.PostAsync("/api/v1/codex/refresh", content: null);
         Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
+    }
+
+    [Fact]
+    public async Task CodexWindowRoutes_ListConfiguredWindows()
+    {
+        SetWindows([
+            FoundWindow("w-codex-a", status: "focused", title: "Codex A"),
+            FoundWindow("w-codex-b", status: "found", title: "Codex B")
+        ]);
+
+        var viewer = await CreateClientAsync(Permission.ViewWindow);
+        var response = await viewer.GetAsync("/api/v1/codex/windows");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var root = await ReadJsonAsync(response);
+        Assert.Equal(2, root.GetProperty("totalCount").GetInt32());
+        var windows = root.GetProperty("windows");
+        Assert.Equal(JsonValueKind.Array, windows.ValueKind);
+        Assert.Equal(2, windows.GetArrayLength());
+        Assert.Equal("w-codex-a", windows[0].GetProperty("windowId").GetString());
+        Assert.Equal("focused", windows[0].GetProperty("status").GetString());
+        Assert.Equal("w-codex-b", windows[1].GetProperty("windowId").GetString());
+        Assert.Equal("found", windows[1].GetProperty("status").GetString());
     }
 
     [Fact]
@@ -276,6 +301,42 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
     }
 
     [Fact]
+    public async Task CaptureRoutes_StartSpecificWindowAndPreviewInactiveWindow()
+    {
+        SetWindows([
+            FoundWindow("w-capture-a", status: "focused", title: "Codex A"),
+            FoundWindow("w-capture-b", status: "found", title: "Codex B")
+        ]);
+
+        var client = await CreateClientAsync(Permission.ViewWindow);
+        var start = await client.PostAsync(
+            "/api/v1/capture/start",
+            CreateJsonContent(new
+            {
+                mode = "balanced",
+                target = "codex_window",
+                windowId = "w-capture-b"
+            }));
+
+        Assert.True(start.IsSuccessStatusCode, await start.Content.ReadAsStringAsync());
+        var startRoot = await ReadJsonAsync(start);
+        Assert.Equal("w-capture-b", startRoot.GetProperty("windowId").GetString());
+
+        var activeFrame = await client.GetAsync("/api/v1/capture/frame");
+        Assert.Equal(HttpStatusCode.OK, activeFrame.StatusCode);
+        Assert.Equal("w-capture-b", _factory.WindowImageCapture.LastCapturedWindowId);
+
+        var inactiveFrame = await client.GetAsync("/api/v1/capture/frame?windowId=w-capture-a");
+        Assert.Equal(HttpStatusCode.OK, inactiveFrame.StatusCode);
+        Assert.Equal("w-capture-a", _factory.WindowImageCapture.LastCapturedWindowId);
+
+        var screenshotClient = await CreateClientAsync(Permission.Screenshot);
+        var screenshot = await screenshotClient.PostAsync("/api/v1/media/screenshot?windowId=w-capture-a", content: null);
+        Assert.True(screenshot.IsSuccessStatusCode, await screenshot.Content.ReadAsStringAsync());
+        Assert.Equal("w-capture-a", _factory.WindowImageCapture.LastCapturedWindowId);
+    }
+
+    [Fact]
     public async Task CaptureFrameRoute_ReturnsJpegAndDoesNotPersistFiles()
     {
         SetWindow(FoundWindow("w-frame-ok", status: "focused"));
@@ -402,12 +463,12 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
         var start = await recordingClient.PostAsync(
             "/api/v1/media/recording/start",
             CreateJsonContent(new { confirmHighRisk = true }));
-        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
+        Assert.True(start.IsSuccessStatusCode, await start.Content.ReadAsStringAsync());
         var startRoot = await ReadJsonAsync(start);
         Assert.Equal("recording", startRoot.GetProperty("status").GetString());
 
         var stop = await recordingClient.PostAsync("/api/v1/media/recording/stop", content: null);
-        Assert.Equal(HttpStatusCode.OK, stop.StatusCode);
+        Assert.True(stop.IsSuccessStatusCode, await stop.Content.ReadAsStringAsync());
         var stopRoot = await ReadJsonAsync(stop);
         Assert.Equal("stopped", stopRoot.GetProperty("status").GetString());
         Assert.EndsWith(".mp4", stopRoot.GetProperty("fileName").GetString(), StringComparison.OrdinalIgnoreCase);
@@ -428,13 +489,22 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
         _factory.Locator.SetSnapshot(snapshot);
     }
 
-    private static CodexWindowSnapshot FoundWindow(string windowId, string status = "found")
+    private void SetWindows(IReadOnlyList<CodexWindowSnapshot> windows)
+    {
+        _factory.Locator.SetWindows(windows);
+    }
+
+    private static CodexWindowSnapshot FoundWindow(
+        string windowId,
+        string status = "found",
+        string title = "Codex",
+        string processName = "codex")
     {
         return new CodexWindowSnapshot(
             Status: status,
             WindowId: windowId,
-            Title: "Codex",
-            ProcessName: "codex",
+            Title: title,
+            ProcessName: processName,
             CandidateCount: 1,
             LastUpdatedAt: DateTimeOffset.UtcNow);
     }
@@ -480,9 +550,11 @@ public sealed class RemoteControlTransportFactory : WebApplicationFactory<Progra
             services.RemoveAll<ICodexWindowProbe>();
             services.RemoveAll<ICodexWindowLocator>();
             services.RemoveAll<IWindowImageCapture>();
+            services.RemoveAll<IClipboardService>();
             services.RemoveAll<IPairingCodeGenerator>();
             services.AddSingleton(Locator);
             services.AddSingleton(WindowImageCapture);
+            services.AddSingleton<IClipboardService, MemoryClipboardService>();
             services.AddSingleton<ICodexWindowLocator>(serviceProvider =>
                 serviceProvider.GetRequiredService<TestCodexWindowLocator>());
             services.AddSingleton<IWindowImageCapture>(serviceProvider =>
@@ -508,6 +580,7 @@ public sealed class TestCodexWindowLocator : ICodexWindowLocator
 {
     private readonly object _sync = new();
 
+    private IReadOnlyList<CodexWindowSnapshot>? _windows;
     private CodexWindowSnapshot _snapshot = new(
         Status: "not_found",
         WindowId: null,
@@ -521,6 +594,22 @@ public sealed class TestCodexWindowLocator : ICodexWindowLocator
         lock (_sync)
         {
             _snapshot = snapshot;
+            _windows = null;
+        }
+    }
+
+    public void SetWindows(IReadOnlyList<CodexWindowSnapshot> windows)
+    {
+        lock (_sync)
+        {
+            _windows = windows;
+            _snapshot = windows.FirstOrDefault(window => window.Status is "focused") ?? windows.FirstOrDefault() ?? new CodexWindowSnapshot(
+                Status: "not_found",
+                WindowId: null,
+                Title: null,
+                ProcessName: null,
+                CandidateCount: 0,
+                LastUpdatedAt: DateTimeOffset.UtcNow);
         }
     }
 
@@ -565,9 +654,10 @@ public sealed class TestCodexWindowLocator : ICodexWindowLocator
 
         lock (_sync)
         {
-            if (string.Equals(_snapshot.WindowId, windowId, StringComparison.OrdinalIgnoreCase))
+            var selected = _windows?.FirstOrDefault(window => string.Equals(window.WindowId, windowId, StringComparison.OrdinalIgnoreCase));
+            if (selected is not null)
             {
-                _snapshot = _snapshot with
+                _snapshot = selected with
                 {
                     Status = "focused",
                     LastUpdatedAt = DateTimeOffset.UtcNow
@@ -590,6 +680,36 @@ public sealed class TestCodexWindowLocator : ICodexWindowLocator
         }
     }
 
+    public Task<CodexWindowListSnapshot> ListWindowsAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (_windows is not null)
+            {
+                return Task.FromResult(new CodexWindowListSnapshot(
+                    Windows: _windows,
+                    ActiveWindowId: _snapshot.WindowId,
+                    TotalCount: _windows.Count,
+                    LastUpdatedAt: _snapshot.LastUpdatedAt));
+            }
+
+            if (_snapshot.WindowId is null)
+            {
+                return Task.FromResult(new CodexWindowListSnapshot(
+                    Windows: [],
+                    ActiveWindowId: null,
+                    TotalCount: 0,
+                    LastUpdatedAt: _snapshot.LastUpdatedAt));
+            }
+
+            return Task.FromResult(new CodexWindowListSnapshot(
+                Windows: [_snapshot],
+                ActiveWindowId: _snapshot.WindowId,
+                TotalCount: 1,
+                LastUpdatedAt: _snapshot.LastUpdatedAt));
+        }
+    }
+
     private static bool IsUnavailable(string status)
     {
         return status is "not_found" or "multiple_candidates" or "permission_issue";
@@ -598,8 +718,10 @@ public sealed class TestCodexWindowLocator : ICodexWindowLocator
 
 public sealed class FakeWindowImageCapture : IWindowImageCapture
 {
+    public string? LastCapturedWindowId { get; private set; }
+
     public static readonly byte[] JpegBytes = Convert.FromBase64String(
-        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxAQEBAQEA8PDw8QDw8PEA8PDw8PFREWFhURFRUYHSggGBolGxUVITEhJSkrLi4uFx8zODMsNygtLisBCgoKDg0OGxAQGzAmICYtLS0tLy0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAEAAQMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAAAAQID/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEAMQAAAByA//xAAZEAEAAgMAAAAAAAAAAAAAAAABABEhMUH/2gAIAQEAAT8AqM3/xAAVEQEBAAAAAAAAAAAAAAAAAAAQIf/aAAgBAgEBPwCf/8QAFBEBAAAAAAAAAAAAAAAAAAAAEP/aAAgBAwEBPwCf/9k=");
+        "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD50ooor8MP9Uz/2Q==");
 
     public static readonly byte[] PngBytes = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+Z94AAAAASUVORK5CYII=");
@@ -609,6 +731,7 @@ public sealed class FakeWindowImageCapture : IWindowImageCapture
         WindowImageFormat format,
         CancellationToken cancellationToken = default)
     {
+        LastCapturedWindowId = window.WindowId;
         if (string.IsNullOrWhiteSpace(window.WindowId) ||
             string.Equals(window.Status, "not_found", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(window.Status, "unavailable", StringComparison.OrdinalIgnoreCase))

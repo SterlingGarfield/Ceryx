@@ -18,7 +18,20 @@ public sealed record CapturePerformanceSignal(
     double CpuUsagePercent,
     double NetworkJitterMs,
     bool HasActiveViewer,
-    DateTimeOffset? ObservedAt = null
+    DateTimeOffset? ObservedAt = null,
+    double? AvailableOutgoingBitrateKbps = null,
+    double? RoundTripTimeMs = null,
+    long? PacketsLost = null,
+    long? PacketsSent = null,
+    double? FramesPerSecond = null,
+    long? FramesEncoded = null,
+    double? QpSum = null
+);
+
+public sealed record CapturePolicyResult(
+    CaptureState State,
+    bool RenegotiationNeeded,
+    string? Reason = null
 );
 
 public interface ICaptureLifecycleService
@@ -30,7 +43,7 @@ public interface ICaptureLifecycleService
 
     Task<CaptureState> StopAsync(CancellationToken cancellationToken = default);
 
-    Task<CaptureState> ApplyPerformanceSignalAsync(
+    Task<CapturePolicyResult> ApplyPerformanceSignalAsync(
         CapturePerformanceSignal signal,
         CancellationToken cancellationToken = default);
 

@@ -54,13 +54,13 @@ public sealed class CapturePolicyTests
             NetworkJitterMs: 10,
             HasActiveViewer: true));
         clock.Advance(TimeSpan.FromSeconds(5));
-        var state = await service.ApplyPerformanceSignalAsync(new CapturePerformanceSignal(
+        var result = await service.ApplyPerformanceSignalAsync(new CapturePerformanceSignal(
             CpuUsagePercent: 80,
             NetworkJitterMs: 12,
             HasActiveViewer: true));
 
-        Assert.Equal(20, state.FrameRate);
-        Assert.Equal("cpu_throttled", state.Quality);
+        Assert.Equal(20, result.State.FrameRate);
+        Assert.Equal("cpu_throttled", result.State.Quality);
     }
 
     [Fact]
@@ -85,10 +85,10 @@ public sealed class CapturePolicyTests
             NetworkJitterMs: 150,
             HasActiveViewer: true));
 
-        Assert.True(degraded.Active);
-        Assert.Equal(960, degraded.Width);
-        Assert.Equal(540, degraded.Height);
-        Assert.Equal("network_degraded", degraded.Quality);
+        Assert.True(degraded.State.Active);
+        Assert.Equal(960, degraded.State.Width);
+        Assert.Equal(540, degraded.State.Height);
+        Assert.Equal("network_degraded", degraded.State.Quality);
 
         clock.Advance(TimeSpan.FromSeconds(4));
         var disconnected = await service.ApplyPerformanceSignalAsync(new CapturePerformanceSignal(
@@ -96,9 +96,9 @@ public sealed class CapturePolicyTests
             NetworkJitterMs: 145,
             HasActiveViewer: true));
 
-        Assert.False(disconnected.Active);
-        Assert.False(disconnected.Paused);
-        Assert.Null(disconnected.WindowId);
+        Assert.False(disconnected.State.Active);
+        Assert.False(disconnected.State.Paused);
+        Assert.Null(disconnected.State.WindowId);
     }
 
     [Fact]
@@ -123,15 +123,150 @@ public sealed class CapturePolicyTests
             NetworkJitterMs: 8,
             HasActiveViewer: false));
 
-        Assert.True(paused.Active);
-        Assert.True(paused.Paused);
+        Assert.True(paused.State.Active);
+        Assert.True(paused.State.Paused);
 
         var resumed = await service.ApplyPerformanceSignalAsync(new CapturePerformanceSignal(
             CpuUsagePercent: 10,
             NetworkJitterMs: 8,
             HasActiveViewer: true));
 
-        Assert.False(resumed.Paused);
+        Assert.False(resumed.State.Paused);
+    }
+
+    [Fact]
+    public async Task PerformancePolicy_HighBandwidthForFiveSeconds_UpgradesTierAndRequestsRenegotiation()
+    {
+        var clock = new FakeCaptureClock(DateTimeOffset.Parse("2026-05-23T00:00:00Z"));
+        var service = new InMemoryCaptureLifecycleService(clock);
+        var window = new CodexWindowSnapshot("found", "w1", "Codex", "codex", 1, clock.UtcNow);
+
+        var started = await service.StartAsync(
+            new CaptureStartBody(Mode: "power_save", Target: "codex_window"),
+            window);
+        Assert.True(started.IsSuccess);
+        Assert.Equal(20, started.Value!.FrameRate);
+
+        var signal = new CapturePerformanceSignal(
+            CpuUsagePercent: 10,
+            NetworkJitterMs: 8,
+            HasActiveViewer: true,
+            AvailableOutgoingBitrateKbps: 7000,
+            RoundTripTimeMs: 8,
+            PacketsLost: 0,
+            PacketsSent: 1000,
+            FramesPerSecond: 20,
+            FramesEncoded: 600,
+            QpSum: 1500);
+
+        await service.ApplyPerformanceSignalAsync(signal);
+        clock.Advance(TimeSpan.FromSeconds(5));
+        var upgraded = await service.ApplyPerformanceSignalAsync(signal);
+
+        Assert.True(upgraded.RenegotiationNeeded);
+        Assert.Equal(30, upgraded.State.FrameRate);
+        Assert.Equal(1280, upgraded.State.Width);
+        Assert.Equal(720, upgraded.State.Height);
+        Assert.Equal("high", upgraded.State.Quality);
+    }
+
+    [Fact]
+    public async Task PerformancePolicy_WeakBandwidthForThreeSeconds_DowngradesTierAndRequestsRenegotiation()
+    {
+        var clock = new FakeCaptureClock(DateTimeOffset.Parse("2026-05-23T00:00:00Z"));
+        var service = new InMemoryCaptureLifecycleService(clock);
+        var window = new CodexWindowSnapshot("found", "w1", "Codex", "codex", 1, clock.UtcNow);
+
+        var started = await service.StartAsync(
+            new CaptureStartBody(Mode: "power_save", Target: "codex_window"),
+            window);
+        Assert.True(started.IsSuccess);
+
+        var healthy = new CapturePerformanceSignal(
+            CpuUsagePercent: 10,
+            NetworkJitterMs: 8,
+            HasActiveViewer: true,
+            AvailableOutgoingBitrateKbps: 7000,
+            RoundTripTimeMs: 8,
+            PacketsLost: 0,
+            PacketsSent: 1000,
+            FramesPerSecond: 20,
+            FramesEncoded: 600,
+            QpSum: 1500);
+
+        await service.ApplyPerformanceSignalAsync(healthy);
+        clock.Advance(TimeSpan.FromSeconds(5));
+        var high = await service.ApplyPerformanceSignalAsync(healthy);
+        Assert.Equal("high", high.State.Quality);
+
+        var constrained = new CapturePerformanceSignal(
+            CpuUsagePercent: 10,
+            NetworkJitterMs: 25,
+            HasActiveViewer: true,
+            AvailableOutgoingBitrateKbps: 2600,
+            RoundTripTimeMs: 25,
+            PacketsLost: 0,
+            PacketsSent: 1000,
+            FramesPerSecond: 30,
+            FramesEncoded: 900,
+            QpSum: 1800);
+
+        await service.ApplyPerformanceSignalAsync(constrained);
+        clock.Advance(TimeSpan.FromSeconds(3));
+        var downgraded = await service.ApplyPerformanceSignalAsync(constrained);
+
+        Assert.True(downgraded.RenegotiationNeeded);
+        Assert.Equal(15, downgraded.State.FrameRate);
+        Assert.Equal("medium", downgraded.State.Quality);
+    }
+
+    [Fact]
+    public async Task PerformancePolicy_PacketLossAboveTenPercent_ImmediatelyDowngradesTier()
+    {
+        var clock = new FakeCaptureClock(DateTimeOffset.Parse("2026-05-23T00:00:00Z"));
+        var service = new InMemoryCaptureLifecycleService(clock);
+        var window = new CodexWindowSnapshot("found", "w1", "Codex", "codex", 1, clock.UtcNow);
+
+        var started = await service.StartAsync(
+            new CaptureStartBody(Mode: "power_save", Target: "codex_window"),
+            window);
+        Assert.True(started.IsSuccess);
+
+        var healthy = new CapturePerformanceSignal(
+            CpuUsagePercent: 10,
+            NetworkJitterMs: 8,
+            HasActiveViewer: true,
+            AvailableOutgoingBitrateKbps: 7000,
+            RoundTripTimeMs: 8,
+            PacketsLost: 0,
+            PacketsSent: 1000,
+            FramesPerSecond: 20,
+            FramesEncoded: 600,
+            QpSum: 1500);
+
+        await service.ApplyPerformanceSignalAsync(healthy);
+        clock.Advance(TimeSpan.FromSeconds(5));
+        await service.ApplyPerformanceSignalAsync(healthy);
+
+        var lossy = new CapturePerformanceSignal(
+            CpuUsagePercent: 10,
+            NetworkJitterMs: 30,
+            HasActiveViewer: true,
+            AvailableOutgoingBitrateKbps: 6500,
+            RoundTripTimeMs: 30,
+            PacketsLost: 180,
+            PacketsSent: 820,
+            FramesPerSecond: 30,
+            FramesEncoded: 900,
+            QpSum: 2100);
+
+        var downgraded = await service.ApplyPerformanceSignalAsync(lossy);
+
+        Assert.True(downgraded.RenegotiationNeeded);
+        Assert.Equal(960, downgraded.State.Width);
+        Assert.Equal(540, downgraded.State.Height);
+        Assert.Equal(8, downgraded.State.FrameRate);
+        Assert.Equal("low", downgraded.State.Quality);
     }
 
     private sealed class FakeCaptureClock : ICaptureClock

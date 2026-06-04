@@ -15,7 +15,8 @@
     "pretypecheck": "pnpm --filter @ceryx/protocol build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "pnpm --filter @ceryx/protocol build",
-    "test": "vitest run --pool=threads"
+    "test": "vitest run --pool=threads",
+    "test:runtime": "pnpm build && node ./scripts/run-vitest-runtime.mjs"
   },
   "dependencies": {
     "@ceryx/protocol": "workspace:*"

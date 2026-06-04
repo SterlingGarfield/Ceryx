@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CodexToolbar } from "./CodexToolbar";
+import { CodexWindowSwitcher } from "./CodexWindowSwitcher";
 import { PromptComposer } from "./PromptComposer";
 import { RemoteViewport } from "./RemoteViewport";
 
@@ -102,5 +103,49 @@ describe("toolbar", () => {
 
     expect(toolbar.getByRole("button", { name: "Paste to Windows" })).toBeEnabled();
     expect(toolbar.getByRole("button", { name: "Copy from Windows" })).toBeEnabled();
+  });
+});
+
+describe("codex window switcher", () => {
+  it("renders window tabs with previews and emits selection clicks", () => {
+    const onSelectWindow = vi.fn();
+
+    render(
+      <CodexWindowSwitcher
+        title="Codex Windows"
+        windows={[
+          {
+            status: "focused",
+            windowId: "hwnd_a",
+            title: "Codex A",
+            processName: "codex",
+            candidateCount: 2,
+            lastUpdatedAt: "2026-06-04T00:00:00.000Z"
+          },
+          {
+            status: "found",
+            windowId: "hwnd_b",
+            title: "Codex B",
+            processName: "codex",
+            candidateCount: 2,
+            lastUpdatedAt: "2026-06-04T00:00:00.000Z"
+          }
+        ]}
+        activeWindowId="hwnd_a"
+        previewUrls={{
+          hwnd_a: "blob:preview-a",
+          hwnd_b: "blob:preview-b"
+        }}
+        onSelectWindow={onSelectWindow}
+      />
+    );
+
+    expect(screen.getByText("Codex Windows")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Codex A/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Codex B/ })).toBeInTheDocument();
+    expect(screen.getByAltText("Codex A preview")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Codex B/ }));
+    expect(onSelectWindow).toHaveBeenCalledWith("hwnd_b");
   });
 });

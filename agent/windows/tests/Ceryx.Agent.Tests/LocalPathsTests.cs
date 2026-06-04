@@ -24,10 +24,7 @@ public sealed class LocalPathsTests
         }
         finally
         {
-            if (Directory.Exists(tempRoot))
-            {
-                Directory.Delete(tempRoot, recursive: true);
-            }
+            TryDeleteDirectory(tempRoot);
         }
     }
 
@@ -58,10 +55,7 @@ public sealed class LocalPathsTests
             Environment.SetEnvironmentVariable("CERYX_REPO_ROOT", oldRepo);
             Environment.SetEnvironmentVariable("CERYX_AGENT_ROOT", oldAgent);
 
-            if (Directory.Exists(repoRoot))
-            {
-                Directory.Delete(repoRoot, recursive: true);
-            }
+            TryDeleteDirectory(repoRoot);
         }
     }
 
@@ -91,15 +85,8 @@ public sealed class LocalPathsTests
             Environment.SetEnvironmentVariable("CERYX_REPO_ROOT", oldRepo);
             Environment.SetEnvironmentVariable("CERYX_AGENT_ROOT", oldAgent);
 
-            if (Directory.Exists(repoRoot))
-            {
-                Directory.Delete(repoRoot, recursive: true);
-            }
-
-            if (Directory.Exists(outsideRoot))
-            {
-                Directory.Delete(outsideRoot, recursive: true);
-            }
+            TryDeleteDirectory(repoRoot);
+            TryDeleteDirectory(outsideRoot);
         }
     }
 
@@ -132,16 +119,36 @@ public sealed class LocalPathsTests
             Environment.SetEnvironmentVariable("CERYX_REPO_ROOT", oldRepo);
             Environment.SetEnvironmentVariable("CERYX_AGENT_ROOT", oldAgent);
 
-            if (Directory.Exists(repoRoot))
-            {
-                Directory.Delete(repoRoot, recursive: true);
-            }
+            TryDeleteDirectory(repoRoot);
         }
     }
 
     private static string CreateWorkspaceTestPath(string prefix)
     {
-        var testRoot = Path.Combine(Directory.GetCurrentDirectory(), ".workspace-data", "test-temp");
+        var repositoryRoot = Environment.GetEnvironmentVariable("CERYX_REPO_ROOT");
+        var testRoot = !string.IsNullOrWhiteSpace(repositoryRoot)
+            ? Path.Combine(Path.GetFullPath(repositoryRoot), ".workspace-data", "tests", "localpaths")
+            : Path.Combine(Path.GetFullPath(AppContext.BaseDirectory), ".workspace-data", "tests", "localpaths");
+
         return Path.Combine(testRoot, $"{prefix}-{Guid.NewGuid():N}");
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 }

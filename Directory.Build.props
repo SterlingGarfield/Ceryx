@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <MSBuildEnableWorkloadResolver>false</MSBuildEnableWorkloadResolver>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+    <BaseIntermediateOutputPath>$(TEMP)\CeryxBuild\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(TEMP)\CeryxBuild\$(MSBuildProjectName)\bin\</BaseOutputPath>
+    <!-- Serialize project-reference builds to avoid restore graph races in the Windows agent tree. -->
+    <BuildInParallel>false</BuildInParallel>
+  </PropertyGroup>
+</Project>

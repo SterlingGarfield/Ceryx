@@ -1,6 +1,6 @@
 import { ceryxColors } from "@ceryx/design-tokens";
 import { Button, Panel, TextArea } from "@ceryx/ui";
-import type { PromptHistoryItem, PromptTemplate } from "./stores/usePromptStore";
+import type { PromptHistoryItem, PromptTemplate } from "./stores/usePromptStore.js";
 
 export interface PromptComposerProps {
   size?: "desktop" | "ipad";

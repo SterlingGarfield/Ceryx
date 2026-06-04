@@ -30,6 +30,13 @@ public sealed record CodexWindowResponse(
     [property: JsonPropertyName("lastUpdatedAt")] string LastUpdatedAt
 );
 
+public sealed record CodexWindowListResponse(
+    [property: JsonPropertyName("windows")] IReadOnlyList<CodexWindowResponse> Windows,
+    [property: JsonPropertyName("activeWindowId")] string? ActiveWindowId,
+    [property: JsonPropertyName("totalCount")] int TotalCount,
+    [property: JsonPropertyName("lastUpdatedAt")] string LastUpdatedAt
+);
+
 public sealed record CodexSelectWindowBody(
     [property: JsonPropertyName("windowId")] string WindowId
 );
@@ -257,8 +264,17 @@ public sealed record ClientSettingsStateResponse(
     [property: JsonPropertyName("keyboardShortcuts")] bool KeyboardShortcuts,
     [property: JsonPropertyName("notificationsEnabled")] bool NotificationsEnabled,
     [property: JsonPropertyName("logsAutoRefresh")] bool LogsAutoRefresh,
+    [property: JsonPropertyName("clipboardAutoSync")] bool ClipboardAutoSync,
+    [property: JsonPropertyName("activeShortcutProfile")] string ActiveShortcutProfile,
+    [property: JsonPropertyName("customShortcuts")] ShortcutProfileResponse CustomShortcuts,
     [property: JsonPropertyName("previewRefreshProfile")] string PreviewRefreshProfile,
     [property: JsonPropertyName("viewportTransport")] string ViewportTransport
+);
+
+public sealed record ShortcutProfileResponse(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("bindings")] IReadOnlyDictionary<string, string> Bindings
 );
 
 public sealed record SettingsResponse(
@@ -283,7 +299,8 @@ public sealed record SettingsPatchBody(
 
 public sealed record CaptureStartBody(
     [property: JsonPropertyName("mode")] string Mode,
-    [property: JsonPropertyName("target")] string Target
+    [property: JsonPropertyName("target")] string Target,
+    [property: JsonPropertyName("windowId")] string? WindowId = null
 );
 
 public sealed record CaptureStateResponse(
@@ -295,8 +312,27 @@ public sealed record CaptureStateResponse(
     [property: JsonPropertyName("width")] int Width,
     [property: JsonPropertyName("height")] int Height,
     [property: JsonPropertyName("frameRate")] int FrameRate,
-    [property: JsonPropertyName("quality")] string Quality
+    [property: JsonPropertyName("quality")] string Quality,
+    [property: JsonPropertyName("recordingAudioActive")] bool RecordingAudioActive
 );
+
+public sealed record RecordingStartBody
+{
+    [property: JsonPropertyName("confirmHighRisk")]
+    public bool ConfirmHighRisk { get; init; }
+
+    [property: JsonPropertyName("includeAudio")]
+    public bool? IncludeAudio { get; init; }
+
+    [property: JsonPropertyName("audioSource")]
+    public string? AudioSource { get; init; }
+
+    [property: JsonPropertyName("maxDurationMinutes")]
+    public int? MaxDurationMinutes { get; init; }
+
+    [property: JsonPropertyName("segmentSizeMB")]
+    public int? SegmentSizeMB { get; init; }
+}
 
 public sealed record CaptureSignalBody(
     [property: JsonPropertyName("sessionId")] string SessionId,
@@ -337,12 +373,37 @@ public sealed record ScreenshotResponse(
 public sealed record RecordingStartResponse(
     [property: JsonPropertyName("ok")] bool Ok,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("startedAt")] string StartedAt
+    [property: JsonPropertyName("startedAt")] string StartedAt,
+    [property: JsonPropertyName("audioEnabled")] bool AudioEnabled,
+    [property: JsonPropertyName("audioFormat")] string AudioFormat
 );
 
 public sealed record RecordingStopResponse(
     [property: JsonPropertyName("ok")] bool Ok,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("sizeBytes")] long SizeBytes
+    [property: JsonPropertyName("sizeBytes")] long SizeBytes,
+    [property: JsonPropertyName("durationSeconds")] double DurationSeconds,
+    [property: JsonPropertyName("outputPaths")] IReadOnlyList<string> OutputPaths,
+    [property: JsonPropertyName("audioEnabled")] bool AudioEnabled,
+    [property: JsonPropertyName("audioFormat")] string AudioFormat
+);
+
+public sealed record RecordingEntryResponse(
+    [property: JsonPropertyName("recordingId")] string RecordingId,
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("sizeBytes")] long SizeBytes,
+    [property: JsonPropertyName("durationSeconds")] double DurationSeconds,
+    [property: JsonPropertyName("audioEnabled")] bool AudioEnabled,
+    [property: JsonPropertyName("audioFormat")] string AudioFormat,
+    [property: JsonPropertyName("thumbnailFileName")] string? ThumbnailFileName,
+    [property: JsonPropertyName("outputPaths")] IReadOnlyList<string> OutputPaths,
+    [property: JsonPropertyName("startedAt")] string StartedAt,
+    [property: JsonPropertyName("stoppedAt")] string StoppedAt
+);
+
+public sealed record RecordingListResponse(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("total")] int Total,
+    [property: JsonPropertyName("items")] IReadOnlyList<RecordingEntryResponse> Items
 );

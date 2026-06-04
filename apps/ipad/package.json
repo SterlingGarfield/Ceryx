@@ -10,7 +10,9 @@
     "pretypecheck": "pnpm --filter @ceryx/feature-remote-control build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "pnpm --filter @ceryx/feature-remote-control build",
-    "test": "vitest run --environment jsdom"
+    "test": "vitest run --environment jsdom",
+    "pretest:runtime": "pnpm --filter @ceryx/feature-remote-control build",
+    "test:runtime": "node ./scripts/run-vitest-runtime.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.3.4",

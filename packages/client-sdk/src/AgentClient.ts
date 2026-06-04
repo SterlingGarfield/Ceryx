@@ -11,7 +11,12 @@ import type {
   CaptureSignalResponse,
   CaptureStartRequest,
   CaptureStateResponse,
+  FileTransferDeleteResponse,
+  FileTransferEntry,
+  FileTransferListResponse,
+  FileTransferUploadResponse,
   CodexSelectWindowRequest,
+  CodexWindowListResponse,
   CodexWindowSnapshot,
   InputActionResponse,
   InputHotkeyRequest,
@@ -40,6 +45,8 @@ import type {
   NotificationReadResponse,
   NotificationsResponse,
   PreviewRefreshProfile,
+  RecordingListResponse,
+  RecordingStartRequest,
   RecordingStartResponse,
   RecordingStopResponse,
   ScreenshotResponse,
@@ -215,6 +222,10 @@ export class AgentClient {
 
   async getCodexWindow(): Promise<CodexWindowSnapshot> {
     return this.request<CodexWindowSnapshot>("/api/v1/codex/window", { auth: true });
+  }
+
+  async listCodexWindows(): Promise<CodexWindowListResponse> {
+    return this.request<CodexWindowListResponse>("/api/v1/codex/windows", { auth: true });
   }
 
   async focusCodexWindow(): Promise<CodexWindowSnapshot> {
@@ -467,10 +478,11 @@ export class AgentClient {
     });
   }
 
-  async getCaptureFrame(): Promise<CaptureFrameResult> {
+  async getCaptureFrame(windowId?: string): Promise<CaptureFrameResult> {
     const headers: Record<string, string> = {
       Accept: "image/jpeg"
     };
+    const query = windowId?.trim();
 
     const token = this.options.getToken?.();
     if (!token) {
@@ -479,7 +491,9 @@ export class AgentClient {
     headers.Authorization = `Bearer ${token}`;
 
     const response = await this.fetchImpl(
-      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/capture/frame`,
+      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/capture/frame${
+        query ? `?windowId=${encodeURIComponent(query)}` : ""
+      }`,
       {
         headers,
         method: "GET"
@@ -508,6 +522,90 @@ export class AgentClient {
     });
   }
 
+  async uploadFile(file: File, targetPath?: string): Promise<FileTransferUploadResponse> {
+    if (!file.name.trim()) {
+      throw new Error("file.name is required");
+    }
+
+    const form = new FormData();
+    form.append("file", file, file.name);
+    if (targetPath && targetPath.trim()) {
+      form.append("targetPath", targetPath.trim());
+    }
+
+    return this.request<FileTransferUploadResponse>("/api/v1/files/upload", {
+      auth: true,
+      method: "POST",
+      body: form
+    });
+  }
+
+  async listFiles(path = "uploads", limit = 100): Promise<FileTransferEntry[]> {
+    if (limit <= 0) {
+      throw new Error("limit must be greater than 0");
+    }
+
+    const search = new URLSearchParams();
+    if (path.trim()) {
+      search.set("path", path.trim());
+    }
+
+    search.set("limit", String(limit));
+
+    const response = await this.request<FileTransferListResponse>(
+      `/api/v1/files/list?${search.toString()}`,
+      {
+        auth: true
+      }
+    );
+
+    return response.files;
+  }
+
+  async downloadFile(fileId: string, signal?: AbortSignal): Promise<Blob> {
+    if (!fileId.trim()) {
+      throw new Error("fileId is required");
+    }
+
+    const headers: Record<string, string> = {
+      Accept: "application/octet-stream"
+    };
+
+    const token = this.options.getToken?.();
+    if (!token) {
+      throw new Error(`Missing device token for authenticated request: /api/v1/files/download/${fileId}`);
+    }
+
+    headers.Authorization = `Bearer ${token}`;
+
+    const response = await this.fetchImpl(
+      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/files/download/${encodeURIComponent(fileId)}`,
+      {
+        headers,
+        method: "GET",
+        signal
+      }
+    );
+
+    if (!response.ok) {
+      const payload = await readJsonPayload(response);
+      throw this.toApiError(response.status, payload);
+    }
+
+    return await response.blob();
+  }
+
+  async deleteFile(fileId: string): Promise<void> {
+    if (!fileId.trim()) {
+      throw new Error("fileId is required");
+    }
+
+    await this.request<FileTransferDeleteResponse>(`/api/v1/files/${encodeURIComponent(fileId)}`, {
+      auth: true,
+      method: "DELETE"
+    });
+  }
+
   async uploadImage(file: UploadImageFile): Promise<UploadImageResponse> {
     if (!file.fileName.trim()) {
       throw new Error("fileName is required");
@@ -523,18 +621,35 @@ export class AgentClient {
     });
   }
 
-  async screenshot(): Promise<ScreenshotResponse> {
-    return this.request<ScreenshotResponse>("/api/v1/media/screenshot", {
-      auth: true,
-      method: "POST"
-    });
+  async screenshot(windowId?: string): Promise<ScreenshotResponse> {
+    const query = windowId?.trim();
+    return this.request<ScreenshotResponse>(
+      `/api/v1/media/screenshot${query ? `?windowId=${encodeURIComponent(query)}` : ""}`,
+      {
+        auth: true,
+        method: "POST"
+      }
+    );
   }
 
-  async startRecording(confirmHighRisk = false): Promise<RecordingStartResponse> {
+  async startRecording(
+    request: boolean | RecordingStartRequest = false
+  ): Promise<RecordingStartResponse> {
+    const body =
+      typeof request === "boolean"
+        ? { confirmHighRisk: request }
+        : {
+            confirmHighRisk: request.confirmHighRisk ?? false,
+            includeAudio: request.includeAudio ?? false,
+            audioSource: request.audioSource,
+            maxDurationMinutes: request.maxDurationMinutes,
+            segmentSizeMB: request.segmentSizeMB
+          };
+
     return this.request<RecordingStartResponse>("/api/v1/media/recording/start", {
       auth: true,
       method: "POST",
-      body: { confirmHighRisk }
+      body
     });
   }
 
@@ -543,6 +658,51 @@ export class AgentClient {
       auth: true,
       method: "POST"
     });
+  }
+
+  async listRecordings(limit = 100): Promise<RecordingListResponse> {
+    if (limit <= 0) {
+      throw new Error("limit must be greater than 0");
+    }
+
+    return this.request<RecordingListResponse>(`/api/v1/media/recordings?limit=${encodeURIComponent(String(limit))}`, {
+      auth: true,
+      method: "GET"
+    });
+  }
+
+  async downloadRecording(fileName: string, signal?: AbortSignal): Promise<Blob> {
+    if (!fileName.trim()) {
+      throw new Error("fileName is required");
+    }
+
+    if (signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
+
+    const token = this.options.getToken?.();
+    if (!token) {
+      throw new Error(`Missing device token for authenticated request: /api/v1/media/recordings/download/${fileName}`);
+    }
+
+    const response = await this.fetchImpl(
+      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/media/recordings/download/${encodeURIComponent(fileName)}`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/octet-stream",
+          Authorization: `Bearer ${token}`
+        },
+        signal
+      }
+    );
+
+    if (!response.ok) {
+      const payload = await readJsonPayload(response);
+      throw this.toApiError(response.status, payload);
+    }
+
+    return response.blob();
   }
 
   async pauseControl(confirmHighRisk = false): Promise<AgentManagementResponse> {

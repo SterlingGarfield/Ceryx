@@ -26,6 +26,28 @@ public sealed class CodexWindowLocator : ICodexWindowLocator
         return await RefreshAsync(cancellationToken);
     }
 
+    public async Task<CodexWindowListSnapshot> ListWindowsAsync(CancellationToken cancellationToken = default)
+    {
+        var candidates = await _probe.ProbeAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var activeWindowId = ResolveActiveWindowId(candidates);
+        var windows = candidates
+            .Select(candidate => ToSnapshot(candidate, candidates.Count, now))
+            .ToArray();
+        var listSnapshot = new CodexWindowListSnapshot(
+            Windows: windows,
+            ActiveWindowId: activeWindowId,
+            TotalCount: candidates.Count,
+            LastUpdatedAt: now);
+
+        lock (_sync)
+        {
+            _lastSnapshot = ResolveSnapshot(candidates, focusedOverride: false);
+        }
+
+        return listSnapshot;
+    }
+
     public async Task<CodexWindowSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
     {
         var candidates = await _probe.ProbeAsync(cancellationToken);
@@ -66,6 +88,35 @@ public sealed class CodexWindowLocator : ICodexWindowLocator
         }
 
         return await RefreshAsync(cancellationToken);
+    }
+
+    private string? ResolveActiveWindowId(IReadOnlyList<CodexWindowCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        lock (_sync)
+        {
+            if (!string.IsNullOrWhiteSpace(_selectedWindowId))
+            {
+                var selected = candidates.FirstOrDefault(candidate =>
+                    string.Equals(candidate.WindowId, _selectedWindowId, StringComparison.OrdinalIgnoreCase));
+                if (selected is not null)
+                {
+                    return selected.WindowId;
+                }
+            }
+        }
+
+        if (candidates.Count == 1)
+        {
+            return candidates[0].WindowId;
+        }
+
+        var focused = candidates.FirstOrDefault(candidate => candidate.IsFocused);
+        return focused?.WindowId;
     }
 
     private CodexWindowSnapshot ResolveSnapshot(
@@ -116,6 +167,24 @@ public sealed class CodexWindowLocator : ICodexWindowLocator
             Title: winner.Title,
             ProcessName: winner.ProcessName,
             CandidateCount: candidates.Count,
+            LastUpdatedAt: now);
+    }
+
+    private static CodexWindowSnapshot ToSnapshot(
+        CodexWindowCandidate candidate,
+        int candidateCount,
+        DateTimeOffset now)
+    {
+        var status = candidate.IsMinimized
+            ? "minimized"
+            : (candidate.IsFocused ? "focused" : "found");
+
+        return new CodexWindowSnapshot(
+            Status: status,
+            WindowId: candidate.WindowId,
+            Title: candidate.Title,
+            ProcessName: candidate.ProcessName,
+            CandidateCount: candidateCount,
             LastUpdatedAt: now);
     }
 }

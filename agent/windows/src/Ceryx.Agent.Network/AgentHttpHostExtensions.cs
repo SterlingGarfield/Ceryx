@@ -116,6 +116,10 @@ public static class AgentHttpHostExtensions
             "/api/v1/codex/window",
             (ICodexWindowLocator locator) => GetCodexWindowHandler(locator))
             .RequireAgentAuth(Permission.ViewWindow);
+        app.MapGet(
+            "/api/v1/codex/windows",
+            (ICodexWindowLocator locator) => ListCodexWindowsHandler(locator))
+            .RequireAgentAuth(Permission.ViewWindow);
         app.MapPost(
             "/api/v1/codex/focus",
             (ICodexWindowLocator locator) => FocusCodexWindowHandler(locator))
@@ -187,17 +191,39 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth(Permission.ViewWindow);
         app.MapGet(
             "/api/v1/capture/state",
-            (ICaptureLifecycleService captureLifecycleService) => CaptureStateHandler(captureLifecycleService))
+            (ICaptureLifecycleService captureLifecycleService, IRecordingService recordingService) =>
+                CaptureStateHandler(captureLifecycleService, recordingService))
             .RequireAgentAuth(Permission.ViewWindow);
         app.MapGet(
             "/api/v1/capture/frame",
-            (HttpContext context, ICodexWindowLocator locator, ICaptureLifecycleService captureLifecycleService, IFramePreviewService framePreviewService) =>
-                CaptureFrameHandler(context, locator, captureLifecycleService, framePreviewService))
+            (HttpContext context, string? windowId, ICodexWindowLocator locator, ICaptureLifecycleService captureLifecycleService, IFramePreviewService framePreviewService) =>
+                CaptureFrameHandler(context, windowId, locator, captureLifecycleService, framePreviewService))
             .RequireAgentAuth(Permission.ViewWindow);
         app.MapPost(
             "/api/v1/capture/webrtc/signal",
             (CaptureSignalBody body, ICaptureSignalService signalService) => CaptureSignalHandler(body, signalService))
             .RequireAgentAuth(Permission.ViewWindow);
+
+        app.MapPost(
+            "/api/v1/files/upload",
+            (HttpContext context, IFileTransferService fileTransferService, IAuditLogStore auditLogStore) =>
+                FileUploadHandler(context, fileTransferService, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent);
+        app.MapGet(
+            "/api/v1/files/list",
+            (HttpContext context, string? path, int? limit, IFileTransferService fileTransferService, IAuditLogStore auditLogStore) =>
+                FileListHandler(context, path, limit, fileTransferService, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent);
+        app.MapGet(
+            "/api/v1/files/download/{fileId}",
+            (HttpContext context, string fileId, IFileTransferService fileTransferService, IAuditLogStore auditLogStore) =>
+                FileDownloadHandler(context, fileId, fileTransferService, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent);
+        app.MapDelete(
+            "/api/v1/files/{fileId}",
+            (HttpContext context, string fileId, IFileTransferService fileTransferService, IAuditLogStore auditLogStore) =>
+                FileDeleteHandler(context, fileId, fileTransferService, auditLogStore))
+            .RequireAgentAuth(Permission.ManageAgent);
 
         app.MapPost(
             "/api/v1/assets/upload-image",
@@ -236,12 +262,22 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth();
         app.MapPost(
             "/api/v1/media/screenshot",
-            (HttpContext context, IScreenshotService screenshotService, ICodexWindowLocator locator, IAuditLogStore auditLogStore) =>
-                ScreenshotHandler(context, screenshotService, locator, auditLogStore))
+            (HttpContext context, string? windowId, IScreenshotService screenshotService, ICodexWindowLocator locator, IAuditLogStore auditLogStore) =>
+                ScreenshotHandler(context, windowId, screenshotService, locator, auditLogStore))
             .RequireAgentAuth(Permission.Screenshot);
+        app.MapGet(
+            "/api/v1/media/recordings",
+            (HttpContext context, int? limit, IRecordingCatalogService recordingCatalogService, IAuditLogStore auditLogStore) =>
+                RecordingListHandler(context, limit, recordingCatalogService, auditLogStore))
+            .RequireAgentAuth(Permission.Recording);
+        app.MapGet(
+            "/api/v1/media/recordings/download/{fileName}",
+            (HttpContext context, string fileName, IRecordingCatalogService recordingCatalogService, IAuditLogStore auditLogStore) =>
+                RecordingDownloadHandler(context, fileName, recordingCatalogService, auditLogStore))
+            .RequireAgentAuth(Permission.Recording);
         app.MapPost(
             "/api/v1/media/recording/start",
-            (HttpContext context, HighRiskConfirmationBody? body, IRecordingService recordingService, ICodexWindowLocator locator, IAuditLogStore auditLogStore) =>
+            (HttpContext context, RecordingStartBody? body, IRecordingService recordingService, ICodexWindowLocator locator, IAuditLogStore auditLogStore) =>
                 RecordingStartHandler(context, body, recordingService, locator, auditLogStore))
             .RequireAgentAuth(Permission.Recording);
         app.MapPost(
@@ -593,11 +629,17 @@ public static class AgentHttpHostExtensions
                 Code: "E_CODEX_NOT_FOUND",
                 Message: "windowId is required.",
                 TraceId: context.GetOrCreateTraceId(),
-                Hint: "Provide a valid windowId from /api/v1/codex/window."));
+                Hint: "Provide a valid windowId from /api/v1/codex/windows or /api/v1/codex/window."));
         }
 
         var snapshot = await locator.SelectWindowAsync(body.WindowId);
         return TypedResults.Ok(ToCodexWindowResponse(snapshot));
+    }
+
+    private static async Task<IResult> ListCodexWindowsHandler(ICodexWindowLocator locator)
+    {
+        var snapshot = await locator.ListWindowsAsync();
+        return TypedResults.Ok(ToCodexWindowListResponse(snapshot));
     }
 
     private static async Task<IResult> InputKeyHandler(
@@ -783,7 +825,26 @@ public static class AgentHttpHostExtensions
         ICaptureLifecycleService captureLifecycleService,
         IAuditLogStore auditLogStore)
     {
-        var window = await locator.GetWindowAsync(context.RequestAborted);
+        CodexWindowSnapshot window;
+        if (!string.IsNullOrWhiteSpace(body.WindowId))
+        {
+            window = await FindCodexWindowAsync(locator, body.WindowId, context.RequestAborted);
+            if (window.WindowId is null)
+            {
+                return ErrorFromAgentError(context, new AgentError(
+                    Code: "E_CODEX_NOT_FOUND",
+                    Message: "Codex window is not available for capture.",
+                    TraceId: context.GetOrCreateTraceId(),
+                    Hint: "Provide a valid windowId from /api/v1/codex/windows or /api/v1/codex/window."));
+            }
+
+            await locator.SelectWindowAsync(window.WindowId, context.RequestAborted);
+        }
+        else
+        {
+            window = await locator.GetWindowAsync(context.RequestAborted);
+        }
+
         var result = await captureLifecycleService.StartAsync(body, window, context.RequestAborted);
         if (!result.IsSuccess || result.Value is null)
         {
@@ -804,19 +865,32 @@ public static class AgentHttpHostExtensions
         return TypedResults.Ok(ToCaptureStateResponse(state));
     }
 
-    private static IResult CaptureStateHandler(ICaptureLifecycleService captureLifecycleService)
+    private static IResult CaptureStateHandler(ICaptureLifecycleService captureLifecycleService, IRecordingService recordingService)
     {
-        return TypedResults.Ok(ToCaptureStateResponse(captureLifecycleService.CurrentState));
+        return TypedResults.Ok(ToCaptureStateResponse(captureLifecycleService.CurrentState, recordingService.IsAudioActive));
     }
 
     private static async Task<IResult> CaptureFrameHandler(
         HttpContext context,
+        string? windowId,
         ICodexWindowLocator locator,
         ICaptureLifecycleService captureLifecycleService,
         IFramePreviewService framePreviewService)
     {
         var captureState = captureLifecycleService.CurrentState;
-        var window = await locator.GetWindowAsync(context.RequestAborted);
+        var requestedWindowId = !string.IsNullOrWhiteSpace(windowId) ? windowId : captureState.WindowId;
+        var window = !string.IsNullOrWhiteSpace(requestedWindowId)
+            ? await FindCodexWindowAsync(locator, requestedWindowId!, context.RequestAborted)
+            : await locator.GetWindowAsync(context.RequestAborted);
+        if (window.WindowId is null)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_CODEX_NOT_FOUND",
+                Message: "Codex window is not available for capture preview.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Provide a valid windowId from /api/v1/codex/windows or /api/v1/codex/window."));
+        }
+
         var frame = await framePreviewService.CaptureLatestAsync(window, captureState, context.RequestAborted);
         if (!frame.IsSuccess || frame.Value is null)
         {
@@ -839,6 +913,190 @@ public static class AgentHttpHostExtensions
     {
         var response = await signalService.SubmitSignalAsync(body);
         return TypedResults.Ok(response);
+    }
+
+    private static async Task<IResult> FileUploadHandler(
+        HttpContext context,
+        IFileTransferService fileTransferService,
+        IAuditLogStore auditLogStore)
+    {
+        if (!context.Request.HasFormContentType)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_FILE_INVALID_REQUEST",
+                Message: "multipart/form-data is required.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Send file uploads as multipart/form-data."));
+        }
+
+        var form = await context.Request.ReadFormAsync(context.RequestAborted);
+        var file = form.Files.FirstOrDefault();
+        if (file is null)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_FILE_INVALID_REQUEST",
+                Message: "No file provided.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Include a file field in the multipart form."));
+        }
+
+        var targetPath = form["targetPath"].FirstOrDefault();
+        await using var stream = file.OpenReadStream();
+        var uploadResult = await fileTransferService.UploadAsync(
+            file.FileName,
+            file.ContentType,
+            targetPath,
+            stream,
+            context.RequestAborted);
+
+        if (!uploadResult.IsSuccess || uploadResult.Value is null)
+        {
+            return ErrorFromAgentError(context, uploadResult.Error ?? new AgentError(
+                Code: "E_FILE_UPLOAD_FAILED",
+                Message: "Failed to upload file.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry the upload or choose a smaller file."));
+        }
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "file.upload",
+            $"fileId={uploadResult.Value.FileId};fileName={uploadResult.Value.FileName};sizeBytes={uploadResult.Value.SizeBytes};targetPath={uploadResult.Value.TargetPath ?? ""}");
+
+        return TypedResults.Ok(new FileTransferUploadResponse(
+            Ok: true,
+            FileId: uploadResult.Value.FileId,
+            FileName: uploadResult.Value.FileName,
+            SizeBytes: uploadResult.Value.SizeBytes,
+            MimeType: uploadResult.Value.MimeType,
+            StoredPath: uploadResult.Value.StoredPath,
+            UploadedAt: uploadResult.Value.UploadedAt,
+            TargetPath: uploadResult.Value.TargetPath));
+    }
+
+    private static async Task<IResult> FileListHandler(
+        HttpContext context,
+        string? path,
+        int? limit,
+        IFileTransferService fileTransferService,
+        IAuditLogStore auditLogStore)
+    {
+        var effectiveLimit = limit ?? 100;
+        if (effectiveLimit <= 0 || effectiveLimit > 500)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_FILE_INVALID_REQUEST",
+                Message: "limit must be between 1 and 500.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry with a smaller limit."));
+        }
+
+        var result = await fileTransferService.ListAsync(path, effectiveLimit, context.RequestAborted);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ErrorFromAgentError(context, result.Error ?? new AgentError(
+                Code: "E_FILE_UPLOAD_FAILED",
+                Message: "Failed to load file list.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Retry or verify the uploads directory is accessible."));
+        }
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "file.list",
+            $"path={path ?? "uploads"};limit={effectiveLimit};total={result.Value.Count}");
+
+        var entries = result.Value
+            .Select(static file => new FileTransferEntryResponse(
+                FileId: file.FileId,
+                FileName: file.FileName,
+                SizeBytes: file.SizeBytes,
+                MimeType: file.MimeType,
+                StoredPath: file.StoredPath,
+                UploadedAt: file.UploadedAt,
+                TargetPath: file.TargetPath))
+            .ToArray();
+
+        return TypedResults.Ok(new FileTransferListResponse(
+            Ok: true,
+            Path: path ?? "uploads",
+            Limit: effectiveLimit,
+            Total: entries.Length,
+            Files: entries));
+    }
+
+    private static async Task<IResult> FileDownloadHandler(
+        HttpContext context,
+        string fileId,
+        IFileTransferService fileTransferService,
+        IAuditLogStore auditLogStore)
+    {
+        var result = await fileTransferService.GetAsync(fileId, context.RequestAborted);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ErrorFromAgentError(context, result.Error ?? new AgentError(
+                Code: "E_FILE_NOT_FOUND",
+                Message: $"File '{fileId}' was not found.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Upload the file first."));
+        }
+
+        if (!File.Exists(result.Value.StoredPath))
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_FILE_NOT_FOUND",
+                Message: $"File '{fileId}' was not found on disk.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Upload the file again."));
+        }
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "file.download",
+            $"fileId={result.Value.FileId};fileName={result.Value.FileName};sizeBytes={result.Value.SizeBytes}");
+
+        var fileStream = File.Open(
+            result.Value.StoredPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+        return Results.File(
+            fileStream,
+            string.IsNullOrWhiteSpace(result.Value.MimeType) ? "application/octet-stream" : result.Value.MimeType,
+            fileDownloadName: result.Value.FileName,
+            lastModified: result.Value.UploadedAt,
+            enableRangeProcessing: true);
+    }
+
+    private static async Task<IResult> FileDeleteHandler(
+        HttpContext context,
+        string fileId,
+        IFileTransferService fileTransferService,
+        IAuditLogStore auditLogStore)
+    {
+        var result = await fileTransferService.DeleteAsync(fileId, context.RequestAborted);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ErrorFromAgentError(context, result.Error ?? new AgentError(
+                Code: "E_FILE_NOT_FOUND",
+                Message: $"File '{fileId}' was not found.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Upload the file first."));
+        }
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "file.delete",
+            $"fileId={result.Value.FileId};fileName={result.Value.FileName};sizeBytes={result.Value.SizeBytes}");
+
+        return TypedResults.Ok(new FileTransferDeleteResponse(
+            Ok: true,
+            Deleted: true,
+            FileId: result.Value.FileId));
     }
 
     private static async Task<IResult> UploadImageHandler(
@@ -1252,11 +1510,23 @@ public static class AgentHttpHostExtensions
 
     private static async Task<IResult> ScreenshotHandler(
         HttpContext context,
+        string? windowId,
         IScreenshotService screenshotService,
         ICodexWindowLocator locator,
         IAuditLogStore auditLogStore)
     {
-        var window = await locator.GetWindowAsync(context.RequestAborted);
+        var window = !string.IsNullOrWhiteSpace(windowId)
+            ? await FindCodexWindowAsync(locator, windowId, context.RequestAborted)
+            : await locator.GetWindowAsync(context.RequestAborted);
+        if (window.WindowId is null)
+        {
+            return ErrorFromAgentError(context, new AgentError(
+                Code: "E_CODEX_NOT_FOUND",
+                Message: "Codex window is not available for screenshot.",
+                TraceId: context.GetOrCreateTraceId(),
+                Hint: "Provide a valid windowId from /api/v1/codex/windows or /api/v1/codex/window."));
+        }
+
         var screenshot = await screenshotService.CaptureAsync(window, context.RequestAborted);
         if (!screenshot.IsSuccess || screenshot.Value is null)
         {
@@ -1273,7 +1543,7 @@ public static class AgentHttpHostExtensions
 
     private static async Task<IResult> RecordingStartHandler(
         HttpContext context,
-        HighRiskConfirmationBody? body,
+        RecordingStartBody? body,
         IRecordingService recordingService,
         ICodexWindowLocator locator,
         IAuditLogStore auditLogStore)
@@ -1294,7 +1564,7 @@ public static class AgentHttpHostExtensions
         }
 
         var window = await locator.GetWindowAsync(context.RequestAborted);
-        var result = await recordingService.StartAsync(window, context.RequestAborted);
+        var result = await recordingService.StartAsync(window, body, context.RequestAborted);
         if (!result.IsSuccess || result.Value is null)
         {
             await WriteAuditAsync(
@@ -1312,6 +1582,82 @@ public static class AgentHttpHostExtensions
             "media.recording.started",
             $"device={ResolveAuditDeviceId(context)};result=started;startedAt={result.Value.StartedAt}");
         return TypedResults.Ok(result.Value);
+    }
+
+    private static async Task<IResult> RecordingListHandler(
+        HttpContext context,
+        int? limit,
+        IRecordingCatalogService recordingCatalogService,
+        IAuditLogStore auditLogStore)
+    {
+        var result = await recordingCatalogService.ListAsync(Math.Clamp(limit ?? 100, 1, 200), context.RequestAborted);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ErrorFromAgentError(context, result.Error ?? new AgentError(
+                Code: "E_RECORDING_NOT_FOUND",
+                Message: "Failed to list recordings.",
+                TraceId: context.GetOrCreateTraceId()));
+        }
+
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "media.recordings.listed",
+            $"device={ResolveAuditDeviceId(context)};count={result.Value.Count}");
+        return TypedResults.Ok(new RecordingListResponse(
+            Ok: true,
+            Total: result.Value.Count,
+            Items: result.Value.Select(entry => new RecordingEntryResponse(
+                RecordingId: entry.RecordingId,
+                FileName: entry.FileName,
+                SizeBytes: entry.SizeBytes,
+                DurationSeconds: entry.DurationSeconds,
+                AudioEnabled: entry.AudioEnabled,
+                AudioFormat: entry.AudioFormat,
+                ThumbnailFileName: entry.ThumbnailFileName,
+                OutputPaths: entry.OutputPaths,
+                StartedAt: entry.StartedAt,
+                StoppedAt: entry.StoppedAt)).ToArray()));
+    }
+
+    private static async Task<IResult> RecordingDownloadHandler(
+        HttpContext context,
+        string fileName,
+        IRecordingCatalogService recordingCatalogService,
+        IAuditLogStore auditLogStore)
+    {
+        var result = await recordingCatalogService.OpenFileAsync(fileName, context.RequestAborted);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return ErrorFromAgentError(context, result.Error ?? new AgentError(
+                Code: "E_RECORDING_NOT_FOUND",
+                Message: $"Recording '{fileName}' was not found.",
+                TraceId: context.GetOrCreateTraceId()));
+        }
+
+        var contentType = ResolveRecordingContentType(fileName);
+        await WriteAuditAsync(
+            auditLogStore,
+            context,
+            "media.recordings.downloaded",
+            $"device={ResolveAuditDeviceId(context)};file={fileName}");
+        return Results.File(result.Value, contentType, fileDownloadName: fileName);
+    }
+
+    private static string ResolveRecordingContentType(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        return extension switch
+        {
+            ".mp4" => "video/mp4",
+            ".mov" => "video/quicktime",
+            ".mkv" => "video/x-matroska",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".wav" => "audio/wav",
+            ".json" => "application/json",
+            _ => "application/octet-stream"
+        };
     }
 
     private static async Task<IResult> RecordingStopHandler(
@@ -1588,6 +1934,7 @@ public static class AgentHttpHostExtensions
             "E_CLIPBOARD_INVALID_REQUEST" => StatusCodes.Status400BadRequest,
             "E_CLIPBOARD_TOO_LARGE" => StatusCodes.Status413PayloadTooLarge,
             "E_CLIPBOARD_EMPTY" => StatusCodes.Status404NotFound,
+            "E_CLIPBOARD_UNAVAILABLE" => StatusCodes.Status503ServiceUnavailable,
             "E_INPUT_BLOCKED" => StatusCodes.Status409Conflict,
             "E_UPLOAD_TOO_LARGE" => StatusCodes.Status413PayloadTooLarge,
             "E_RECORDING_BUSY" => StatusCodes.Status409Conflict,
@@ -1626,7 +1973,33 @@ public static class AgentHttpHostExtensions
             LastUpdatedAt: snapshot.LastUpdatedAt.ToString("O"));
     }
 
-    private static CaptureStateResponse ToCaptureStateResponse(CaptureState state)
+    private static async Task<CodexWindowSnapshot> FindCodexWindowAsync(
+        ICodexWindowLocator locator,
+        string windowId,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await locator.ListWindowsAsync(cancellationToken);
+        var window = snapshot.Windows.FirstOrDefault(candidate =>
+            string.Equals(candidate.WindowId, windowId, StringComparison.OrdinalIgnoreCase));
+        return window ?? new CodexWindowSnapshot(
+            Status: "not_found",
+            WindowId: null,
+            Title: null,
+            ProcessName: null,
+            CandidateCount: snapshot.TotalCount,
+            LastUpdatedAt: snapshot.LastUpdatedAt);
+    }
+
+    private static CodexWindowListResponse ToCodexWindowListResponse(CodexWindowListSnapshot snapshot)
+    {
+        return new CodexWindowListResponse(
+            Windows: snapshot.Windows.Select(ToCodexWindowResponse).ToArray(),
+            ActiveWindowId: snapshot.ActiveWindowId,
+            TotalCount: snapshot.TotalCount,
+            LastUpdatedAt: snapshot.LastUpdatedAt.ToString("O"));
+    }
+
+    private static CaptureStateResponse ToCaptureStateResponse(CaptureState state, bool recordingAudioActive = false)
     {
         return new CaptureStateResponse(
             Ok: true,
@@ -1637,7 +2010,8 @@ public static class AgentHttpHostExtensions
             Width: state.Width,
             Height: state.Height,
             FrameRate: state.FrameRate,
-            Quality: state.Quality);
+            Quality: state.Quality,
+            RecordingAudioActive: recordingAudioActive);
     }
 
     private static async Task<(bool IsSuccess, InputExecutionContext? Context, IResult? ErrorResult)> PrepareInputContextAsync(
@@ -1902,6 +2276,23 @@ public static class AgentHttpHostExtensions
                 KeyboardShortcuts: true,
                 NotificationsEnabled: true,
                 LogsAutoRefresh: true,
+                ClipboardAutoSync: false,
+                ActiveShortcutProfile: "vscode-style",
+                CustomShortcuts: new ShortcutProfileResponse(
+                    Id: "custom",
+                    Name: "Custom",
+                    Bindings: new Dictionary<string, string>
+                    {
+                        ["capture.toggle"] = "Ctrl+Shift+C",
+                        ["media.screenshot"] = "Ctrl+Shift+S",
+                        ["input.prompt.send"] = "Ctrl+Enter",
+                        ["window.focus"] = "Ctrl+Shift+F",
+                        ["navigation.diff"] = "Ctrl+Shift+D",
+                        ["navigation.logs"] = "Ctrl+Shift+L",
+                        ["navigation.settings"] = "Ctrl+,",
+                        ["clipboard.sendToWindows"] = "Ctrl+Shift+V",
+                        ["help.toggle"] = "?"
+                    }),
                 PreviewRefreshProfile: "balanced",
                 ViewportTransport: "webrtc"));
     }
@@ -1942,6 +2333,11 @@ public static class AgentHttpHostExtensions
     }
 
     private static bool IsHighRiskConfirmed(HighRiskConfirmationBody? body)
+    {
+        return body?.ConfirmHighRisk is true;
+    }
+
+    private static bool IsHighRiskConfirmed(RecordingStartBody? body)
     {
         return body?.ConfirmHighRisk is true;
     }

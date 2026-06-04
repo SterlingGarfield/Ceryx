@@ -123,6 +123,7 @@ Clipboard payload policy:
 - Maximum payload size is 10MB (`E_CLIPBOARD_TOO_LARGE`).
 - Empty clipboard returns `E_CLIPBOARD_EMPTY`.
 - Invalid type/content returns `E_CLIPBOARD_INVALID_REQUEST`.
+- Clipboard backend access failures return `E_CLIPBOARD_UNAVAILABLE`.
 - Clipboard actions write audit events:
   - `clipboard.send`
   - `clipboard.receive`

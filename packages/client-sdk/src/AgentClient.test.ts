@@ -236,6 +236,56 @@ describe("AgentClient", () => {
     });
   });
 
+  it("calls codex windows list endpoint with authenticated GET", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          windows: [
+            {
+              status: "focused",
+              windowId: "w_001",
+              title: "Codex A",
+              processName: "codex",
+              candidateCount: 2,
+              lastUpdatedAt: "2026-05-21T00:00:00.000Z"
+            },
+            {
+              status: "found",
+              windowId: "w_002",
+              title: "Codex B",
+              processName: "codex",
+              candidateCount: 2,
+              lastUpdatedAt: "2026-05-21T00:00:00.000Z"
+            }
+          ],
+          totalCount: 2,
+          lastUpdatedAt: "2026-05-21T00:00:00.000Z"
+        });
+      }
+    });
+
+    const listWindows = (client as unknown as { listCodexWindows: () => Promise<unknown> }).listCodexWindows;
+    const response = await listWindows.call(client);
+    const root = response as {
+      windows: Array<{ status: string; windowId: string }>;
+      totalCount: number;
+    };
+
+    expect(root.totalCount).toBe(2);
+    expect(root.windows).toHaveLength(2);
+    expect(root.windows[0]?.windowId).toBe("w_001");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/codex/windows");
+    expect(calls[0]?.init?.method).toBe("GET");
+    expect(calls[0]?.init?.headers).toMatchObject({
+      Accept: "application/json",
+      Authorization: "Bearer token_123"
+    });
+  });
+
   it("sends multipart payload for upload image", async () => {
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     const client = new AgentClient({
@@ -266,6 +316,37 @@ describe("AgentClient", () => {
     expect(calls[0]?.init?.headers).not.toMatchObject({
       "Content-Type": "application/json"
     });
+  });
+
+  it("sends multipart payload for file upload", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          fileId: "file_001",
+          fileName: "notes.txt",
+          sizeBytes: 10,
+          mimeType: "text/plain",
+          storedPath: "C:/tmp/notes.txt",
+          uploadedAt: "2026-05-29T00:00:00.000Z",
+          targetPath: "docs/inbox"
+        });
+      }
+    });
+
+    const file = new File(["hello file"], "notes.txt", { type: "text/plain" });
+    const response = await client.uploadFile(file, "docs/inbox");
+
+    expect(response.ok).toBe(true);
+    expect(response.fileId).toBe("file_001");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/files/upload");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBeInstanceOf(FormData);
+    expect((calls[0]?.init?.body as FormData).get("targetPath")).toBe("docs/inbox");
   });
 
   it("surfaces capture policy errors with typed api error", async () => {
@@ -300,6 +381,42 @@ describe("AgentClient", () => {
       code: "E_CAPTURE_DENIED",
       status: 403
     });
+  });
+
+  it("includes window ids when starting capture for a specific Codex window", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          active: true,
+          paused: false,
+          mode: "balanced",
+          windowId: "w_002",
+          width: 1280,
+          height: 720
+        });
+      }
+    });
+
+    await client.startCapture({
+      mode: "balanced",
+      target: "codex_window",
+      windowId: "w_002"
+    });
+
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/capture/start");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(
+      JSON.stringify({
+        mode: "balanced",
+        target: "codex_window",
+        windowId: "w_002"
+      })
+    );
   });
 
   it("posts prompt payload to prompt endpoint", async () => {
@@ -466,6 +583,103 @@ describe("AgentClient", () => {
     expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/media/recording/start");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ confirmHighRisk: true }));
+  });
+
+  it("posts recording options when starting recording with audio", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          status: "recording",
+          startedAt: "2026-05-22T07:00:00.000Z",
+          audioEnabled: true,
+          audioFormat: "pcm_s16le"
+        });
+      }
+    });
+
+    const response = await client.startRecording({
+      confirmHighRisk: true,
+      includeAudio: true,
+      audioSource: "system",
+      maxDurationMinutes: 45,
+      segmentSizeMB: 4096
+    });
+
+    expect(response.audioEnabled).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/media/recording/start");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(
+      JSON.stringify({
+        confirmHighRisk: true,
+        includeAudio: true,
+        audioSource: "system",
+        maxDurationMinutes: 45,
+        segmentSizeMB: 4096
+      })
+    );
+  });
+
+  it("lists recordings from the recordings endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          total: 1,
+          items: [
+            {
+              recordingId: "rec_001",
+              fileName: "rec_001.mp4",
+              sizeBytes: 1024,
+              durationSeconds: 12.5,
+              audioEnabled: false,
+              audioFormat: "none",
+              thumbnailFileName: "thumbnail.jpg",
+              outputPaths: ["rec_001.mp4"],
+              startedAt: "2026-05-22T07:00:00.000Z",
+              stoppedAt: "2026-05-22T07:00:12.500Z"
+            }
+          ]
+        });
+      }
+    });
+
+    const response = await client.listRecordings(25);
+
+    expect(response.total).toBe(1);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/media/recordings?limit=25");
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("downloads recordings from the recordings download endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return new Response("recording-bytes", {
+          status: 200,
+          headers: {
+            "Content-Type": "video/mp4"
+          }
+        });
+      }
+    });
+
+    const blob = await client.downloadRecording("rec_001.mp4");
+
+    expect(blob.type).toBe("video/mp4");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/media/recordings/download/rec_001.mp4");
+    expect(calls[0]?.init?.method).toBe("GET");
   });
 
   it("posts high-risk confirmation when pausing control", async () => {
@@ -683,6 +897,58 @@ describe("AgentClient", () => {
       Accept: "image/jpeg",
       Authorization: "Bearer token_123"
     });
+  });
+
+  it("requests a specific capture frame for a window id", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const frameBlob = new Blob(["jpeg"], { type: "image/jpeg" });
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return new Response(frameBlob, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/jpeg",
+            "X-Ceryx-Frame-Captured-At": "2026-05-27T01:00:00.000Z",
+            "X-Ceryx-Frame-Width": "1280",
+            "X-Ceryx-Frame-Height": "720"
+          }
+        });
+      }
+    });
+
+    await client.getCaptureFrame("w_001");
+
+    expect(calls[0]?.url).toBe(
+      "http://127.0.0.1:41527/api/v1/capture/frame?windowId=w_001"
+    );
+  });
+
+  it("posts screenshots for a specific window id", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          fileName: "screenshot.png",
+          fileId: "asset_001",
+          sizeBytes: 123,
+          mimeType: "image/png"
+        });
+      }
+    });
+
+    await client.screenshot("w_001");
+
+    expect(calls[0]?.url).toBe(
+      "http://127.0.0.1:41527/api/v1/media/screenshot?windowId=w_001"
+    );
+    expect(calls[0]?.init?.method).toBe("POST");
   });
 
   it("requests project diff from diff endpoint", async () => {

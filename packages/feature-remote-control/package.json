@@ -15,7 +15,8 @@
     "pretypecheck": "pnpm --filter @ceryx/ui build && pnpm --filter @ceryx/client-sdk build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "pnpm --filter @ceryx/ui build && pnpm --filter @ceryx/client-sdk build",
-    "test": "vitest run --pool=threads --environment jsdom"
+    "test": "vitest run --pool=threads --environment jsdom",
+    "test:runtime": "pnpm --filter @ceryx/ui build && pnpm --filter @ceryx/client-sdk build && pnpm build && node ./scripts/run-vitest-runtime.mjs"
   },
   "dependencies": {
     "@ceryx/client-sdk": "workspace:^",

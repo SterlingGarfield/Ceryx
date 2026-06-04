@@ -94,9 +94,7 @@ public sealed class DiffServiceTests
 
     private static async Task WithWorkspaceRootAsync(Func<string, Task> action)
     {
-        var repoRoot = Environment.GetEnvironmentVariable("CERYX_REPO_ROOT")
-            ?? Path.GetFullPath(Directory.GetCurrentDirectory());
-        var testRoot = Path.Combine(repoRoot, ".workspace-data", "tests", "diff");
+        var testRoot = Path.Combine(Path.GetTempPath(), "ceryx-tests", "diff");
         var path = Path.Combine(testRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
 

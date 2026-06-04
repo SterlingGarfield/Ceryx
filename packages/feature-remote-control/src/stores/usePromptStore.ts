@@ -2,7 +2,7 @@ import { create } from "zustand";
 import {
   createPromptDraftStorage,
   type PromptDraftStorage
-} from "./promptDraftStorage";
+} from "./promptDraftStorage.js";
 
 export interface PromptTemplate {
   id: string;

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Ceryx.Agent.Codex.WindowLocator;
 
@@ -32,13 +33,15 @@ public sealed class ProcessCodexWindowProbe : ICodexWindowProbe
                     continue;
                 }
 
-                var windowId = $"hwnd_{process.MainWindowHandle.ToInt64():X}";
+                var hwnd = process.MainWindowHandle;
+                var windowId = $"hwnd_{process.Id:X}_{hwnd.ToInt64():X}";
                 results.Add(new CodexWindowCandidate(
                     WindowId: windowId,
                     Title: title,
                     ProcessName: processName,
-                    IsFocused: false,
-                    IsMinimized: false));
+                    IsFocused: GetForegroundWindow() == hwnd,
+                    IsMinimized: IsIconic(hwnd),
+                    ProcessId: process.Id));
             }
             catch
             {
@@ -52,4 +55,10 @@ public sealed class ProcessCodexWindowProbe : ICodexWindowProbe
 
         return Task.FromResult<IReadOnlyList<CodexWindowCandidate>>(results);
     }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool IsIconic(IntPtr hWnd);
 }

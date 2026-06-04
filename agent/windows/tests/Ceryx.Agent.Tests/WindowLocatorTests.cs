@@ -39,6 +39,32 @@ public sealed class WindowLocatorTests
         Assert.Equal("w2", focused.WindowId);
     }
 
+    [Fact]
+    public async Task WindowLocator_ListWindows_ReturnsAllCandidates()
+    {
+        var locator = new CodexWindowLocator(new FakeProbe(
+        [
+            new CodexWindowCandidate("w1", "Codex A", "codex", false, false),
+            new CodexWindowCandidate("w2", "Codex B", "codex", true, false)
+        ]));
+
+        var method = typeof(CodexWindowLocator).GetMethod("ListWindowsAsync");
+        Assert.NotNull(method);
+
+        var task = method!.Invoke(locator, [CancellationToken.None]) as Task;
+        Assert.NotNull(task);
+        await task!;
+
+        var result = task!.GetType().GetProperty("Result")!.GetValue(task)!;
+        var windows = (System.Collections.IEnumerable?)result.GetType().GetProperty("Windows")!.GetValue(result);
+        var totalCount = (int)result.GetType().GetProperty("TotalCount")!.GetValue(result)!;
+        var activeWindowId = (string?)result.GetType().GetProperty("ActiveWindowId")!.GetValue(result);
+
+        Assert.Equal(2, totalCount);
+        Assert.Equal("w2", activeWindowId);
+        Assert.Equal(2, windows!.Cast<object>().Count());
+    }
+
     private sealed class FakeProbe : ICodexWindowProbe
     {
         private readonly IReadOnlyList<CodexWindowCandidate> _candidates;

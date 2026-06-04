@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
     <ProjectReference Include="..\Ceryx.Agent.Core\Ceryx.Agent.Core.csproj" />
   </ItemGroup>
 </Project>

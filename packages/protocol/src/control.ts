@@ -1,4 +1,6 @@
-import type { CodexWindowStatus } from "./devices";
+import type { CodexWindowStatus } from "./devices.js";
+import type { GestureProfile } from "./gestures.js";
+import type { ShortcutProfile } from "./shortcuts.js";
 
 export const CaptureModes = [
   "balanced",
@@ -19,6 +21,13 @@ export interface CodexWindowSnapshot {
   title?: string | null;
   processName?: string | null;
   candidateCount: number;
+  lastUpdatedAt: string;
+}
+
+export interface CodexWindowListResponse {
+  windows: CodexWindowSnapshot[];
+  activeWindowId?: string | null;
+  totalCount: number;
   lastUpdatedAt: string;
 }
 
@@ -102,6 +111,7 @@ export interface ClipboardClearResponse {
 export interface CaptureStartRequest {
   mode: CaptureMode | string;
   target: "codex_window" | "full_desktop" | string;
+  windowId?: string | null;
 }
 
 export interface CaptureStateResponse {
@@ -114,6 +124,15 @@ export interface CaptureStateResponse {
   height: number;
   frameRate?: number;
   quality?: string;
+  recordingAudioActive?: boolean;
+}
+
+export interface RecordingStartRequest {
+  confirmHighRisk?: boolean;
+  includeAudio?: boolean;
+  audioSource?: string;
+  maxDurationMinutes?: number;
+  segmentSizeMB?: number;
 }
 
 export interface CaptureSignalRequest {
@@ -146,6 +165,41 @@ export interface UploadImageResponse {
   sizeBytes: number;
 }
 
+export interface FileTransferUploadResponse {
+  ok: boolean;
+  fileId: string;
+  fileName: string;
+  sizeBytes: number;
+  mimeType: string;
+  storedPath: string;
+  uploadedAt: string;
+  targetPath?: string | null;
+}
+
+export interface FileTransferEntry {
+  fileId: string;
+  fileName: string;
+  sizeBytes: number;
+  mimeType: string;
+  storedPath: string;
+  uploadedAt: string;
+  targetPath?: string | null;
+}
+
+export interface FileTransferListResponse {
+  ok: boolean;
+  path: string;
+  limit: number;
+  total: number;
+  files: FileTransferEntry[];
+}
+
+export interface FileTransferDeleteResponse {
+  ok: boolean;
+  deleted: boolean;
+  fileId: string;
+}
+
 export interface ScreenshotResponse {
   ok: boolean;
   fileName: string;
@@ -156,6 +210,8 @@ export interface RecordingStartResponse {
   ok: boolean;
   status: string;
   startedAt: string;
+  audioEnabled: boolean;
+  audioFormat: string;
 }
 
 export interface RecordingStopResponse {
@@ -163,6 +219,29 @@ export interface RecordingStopResponse {
   status: string;
   fileName: string;
   sizeBytes: number;
+  durationSeconds: number;
+  outputPaths: string[];
+  audioEnabled: boolean;
+  audioFormat: string;
+}
+
+export interface RecordingEntryResponse {
+  recordingId: string;
+  fileName: string;
+  sizeBytes: number;
+  durationSeconds: number;
+  audioEnabled: boolean;
+  audioFormat: string;
+  thumbnailFileName?: string | null;
+  outputPaths: string[];
+  startedAt: string;
+  stoppedAt: string;
+}
+
+export interface RecordingListResponse {
+  ok: boolean;
+  total: number;
+  items: RecordingEntryResponse[];
 }
 
 export interface AgentPathsResponse {
@@ -226,6 +305,12 @@ export interface ClientSettingsState {
   keyboardShortcuts: boolean;
   notificationsEnabled: boolean;
   logsAutoRefresh: boolean;
+  clipboardAutoSync?: boolean;
+  lockLocalInputWhenCapturing?: boolean;
+  activeGestureProfile?: string;
+  customGestures?: GestureProfile;
+  activeShortcutProfile?: string;
+  customShortcuts?: ShortcutProfile;
   previewRefreshProfile: PreviewRefreshProfile | string;
   viewportTransport?: ViewportTransport | string;
 }

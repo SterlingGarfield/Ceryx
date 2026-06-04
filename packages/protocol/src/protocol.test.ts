@@ -47,6 +47,7 @@ describe("v0.3 protocol constants", () => {
     expect(ProtectedApiRoutes).toContain("POST /api/v1/clipboard/send");
     expect(ProtectedApiRoutes).toContain("GET /api/v1/clipboard/receive");
     expect(ProtectedApiRoutes).toContain("POST /api/v1/clipboard/clear");
+    expect(ProtectedApiRoutes).toContain("GET /api/v1/codex/windows");
   });
 
   it("defines runtime statuses and event names for connection flow", () => {

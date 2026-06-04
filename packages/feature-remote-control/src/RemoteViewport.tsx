@@ -2,6 +2,7 @@ import { ceryxColors } from "@ceryx/design-tokens";
 import type { CaptureStateResponse } from "@ceryx/protocol";
 import { Button, Panel, StatusChip } from "@ceryx/ui";
 import type { ReactNode } from "react";
+import { ViewportQualityIndicator } from "./ViewportQualityIndicator.js";
 
 export interface RemoteViewportProps {
   size?: "desktop" | "ipad";
@@ -70,6 +71,11 @@ export function RemoteViewport({
           <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 13 }}>
             {deviceName} | latency {typeof latencyMs === "number" ? `${latencyMs} ms` : "-"}
           </div>
+          <ViewportQualityIndicator
+            captureState={captureState}
+            frameRate={frameRate}
+            latencyMs={latencyMs}
+          />
         </div>
 
         <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 8 }}>

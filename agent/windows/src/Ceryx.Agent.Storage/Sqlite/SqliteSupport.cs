@@ -38,7 +38,7 @@ public sealed class SqliteConnectionFactory
         var pragma = connection.CreateCommand();
         pragma.CommandText = $"""
             PRAGMA busy_timeout = {BusyTimeoutMilliseconds};
-            PRAGMA journal_mode = WAL;
+            PRAGMA journal_mode = DELETE;
             PRAGMA synchronous = NORMAL;
             """;
         await pragma.ExecuteNonQueryAsync(cancellationToken);

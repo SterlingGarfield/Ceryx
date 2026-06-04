@@ -10,12 +10,15 @@
     "pretypecheck": "pnpm --filter @ceryx/feature-remote-control build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "pnpm --filter @ceryx/feature-remote-control build",
-    "test": "vitest run --environment jsdom"
+    "test": "vitest run --environment jsdom",
+    "pretest:runtime": "pnpm --filter @ceryx/feature-remote-control build",
+    "test:runtime": "node ./scripts/run-vitest-runtime.mjs"
   },
   "dependencies": {
     "@ceryx/client-sdk": "workspace:^",
     "@ceryx/design-tokens": "workspace:*",
     "@ceryx/feature-remote-control": "workspace:^",
+    "@ceryx/protocol": "workspace:^",
     "@ceryx/ui": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

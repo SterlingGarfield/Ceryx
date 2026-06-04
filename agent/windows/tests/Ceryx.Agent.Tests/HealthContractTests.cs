@@ -82,20 +82,25 @@ public class HealthContractTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.True(Path.IsPathRooted(rootPath));
 
         var fullRootPath = Path.GetFullPath(rootPath!);
-        if (OperatingSystem.IsWindows())
+        var agentRootOverride = Environment.GetEnvironmentVariable("CERYX_AGENT_ROOT_OVERRIDE");
+        if (!string.IsNullOrWhiteSpace(agentRootOverride))
+        {
+            Assert.Equal(Path.GetFullPath(agentRootOverride), fullRootPath);
+        }
+        else if (OperatingSystem.IsWindows())
         {
             Assert.False(fullRootPath.StartsWith("C:\\", StringComparison.OrdinalIgnoreCase));
-        }
 
-        var repoRoot = Environment.GetEnvironmentVariable("CERYX_REPO_ROOT");
-        if (!string.IsNullOrWhiteSpace(repoRoot))
-        {
-            var fullRepoRoot = Path.GetFullPath(repoRoot)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-            var normalizedRoot = fullRootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-            Assert.StartsWith(fullRepoRoot, normalizedRoot, StringComparison.OrdinalIgnoreCase);
+            var repoRoot = Environment.GetEnvironmentVariable("CERYX_REPO_ROOT");
+            if (!string.IsNullOrWhiteSpace(repoRoot))
+            {
+                var fullRepoRoot = Path.GetFullPath(repoRoot)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                var normalizedRoot = fullRootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                Assert.StartsWith(fullRepoRoot, normalizedRoot, StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         Assert.Equal(Path.Combine(rootPath!, "Logs"), root.GetProperty("logs").GetString());

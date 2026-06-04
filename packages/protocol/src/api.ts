@@ -1,4 +1,4 @@
-import type { CeryxPermission } from "./permissions";
+import type { CeryxPermission } from "./permissions.js";
 
 export const ApiPrefix = "/api/v1" as const;
 
@@ -17,6 +17,7 @@ export const ProtectedApiRoutes = [
   "GET /api/v1/devices",
   "DELETE /api/v1/devices/{deviceId}",
   "GET /api/v1/codex/window",
+  "GET /api/v1/codex/windows",
   "POST /api/v1/codex/focus",
   "POST /api/v1/codex/refresh",
   "POST /api/v1/codex/select-window",
@@ -31,6 +32,12 @@ export const ProtectedApiRoutes = [
   "GET /api/v1/capture/state",
   "GET /api/v1/capture/frame",
   "POST /api/v1/capture/webrtc/signal",
+  "POST /api/v1/files/upload",
+  "GET /api/v1/files/list",
+  "GET /api/v1/files/download/{fileId}",
+  "DELETE /api/v1/files/{fileId}",
+  "GET /api/v1/media/recordings",
+  "GET /api/v1/media/recordings/download/{fileName}",
   "POST /api/v1/clipboard/send",
   "GET /api/v1/clipboard/receive",
   "POST /api/v1/clipboard/clear",
@@ -70,6 +77,7 @@ export const RoutePermissions: RoutePermission[] = [
   { route: "GET /api/v1/devices", permission: "manage_devices" },
   { route: "DELETE /api/v1/devices/{deviceId}", permission: "manage_devices" },
   { route: "GET /api/v1/codex/window", permission: "view_window" },
+  { route: "GET /api/v1/codex/windows", permission: "view_window" },
   { route: "POST /api/v1/codex/focus", permission: "control_input" },
   { route: "POST /api/v1/codex/refresh", permission: "view_window" },
   { route: "POST /api/v1/codex/select-window", permission: "control_input" },
@@ -84,6 +92,10 @@ export const RoutePermissions: RoutePermission[] = [
   { route: "GET /api/v1/capture/state", permission: "view_window" },
   { route: "GET /api/v1/capture/frame", permission: "view_window" },
   { route: "POST /api/v1/capture/webrtc/signal", permission: "view_window" },
+  { route: "POST /api/v1/files/upload", permission: "manage_agent" },
+  { route: "GET /api/v1/files/list", permission: "manage_agent" },
+  { route: "GET /api/v1/files/download/{fileId}", permission: "manage_agent" },
+  { route: "DELETE /api/v1/files/{fileId}", permission: "manage_agent" },
   { route: "POST /api/v1/clipboard/send", permission: "manage_agent" },
   { route: "GET /api/v1/clipboard/receive", permission: "manage_agent" },
   { route: "POST /api/v1/clipboard/clear", permission: "manage_agent" },
@@ -97,6 +109,8 @@ export const RoutePermissions: RoutePermission[] = [
   { route: "POST /api/v1/media/screenshot", permission: "screenshot" },
   { route: "POST /api/v1/media/recording/start", permission: "recording" },
   { route: "POST /api/v1/media/recording/stop", permission: "recording" },
+  { route: "GET /api/v1/media/recordings", permission: "recording" },
+  { route: "GET /api/v1/media/recordings/download/{fileName}", permission: "recording" },
   { route: "POST /api/v1/agent/pause-control", permission: "manage_agent" },
   { route: "POST /api/v1/agent/resume-control", permission: "manage_agent" },
   { route: "POST /api/v1/agent/open-logs-folder", permission: "manage_agent" },
