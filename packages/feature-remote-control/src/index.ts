@@ -10,6 +10,7 @@ export * from "./RemoteViewport.js";
 export * from "./ViewportQualityIndicator.js";
 export * from "./gestureEngine.js";
 export * from "./keyboardShortcuts.js";
+export * from "./trustedDeviceVault.js";
 export * from "./useViewportPreview.js";
 export * from "./useWebRtcViewport.js";
 export * from "./defaultPermissions.js";

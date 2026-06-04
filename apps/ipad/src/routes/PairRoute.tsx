@@ -10,6 +10,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   confirmPairing,
   desktopConfirmPairing,
+  listTrustedDevices,
   requestPairing
 } from "../platform/ipad/agentGateway";
 import {
@@ -120,6 +121,7 @@ export function PairRoute() {
         pairingStore.markSuccess(result.deviceId);
         setTokenState("valid");
         markConnected();
+        await listTrustedDevices(baseUrl);
         navigate("/connections");
       } else {
         pairingStore.markRejected({

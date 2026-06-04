@@ -1,3 +1,4 @@
+import type { WakeOnLanInfo } from "./devices.js";
 import type { ClientType } from "./devices.js";
 import type { CeryxPermission } from "./permissions.js";
 
@@ -34,6 +35,7 @@ export interface PairingConfirmResponse {
   deviceId: string;
   deviceToken: string;
   permissions: CeryxPermission[];
+  wol?: WakeOnLanInfo;
 }
 
 export const PairingStates = [

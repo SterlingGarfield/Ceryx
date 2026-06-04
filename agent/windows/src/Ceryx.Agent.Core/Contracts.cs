@@ -70,7 +70,8 @@ public sealed record PairingConfirmResponse(
     [property: JsonPropertyName("ok")] bool Ok,
     [property: JsonPropertyName("deviceId")] string DeviceId,
     [property: JsonPropertyName("deviceToken")] string DeviceToken,
-    [property: JsonPropertyName("permissions")] IReadOnlyList<string> Permissions
+    [property: JsonPropertyName("permissions")] IReadOnlyList<string> Permissions,
+    [property: JsonPropertyName("wol")] WakeOnLanInfo? Wol
 );
 
 public sealed record PairingConfirmRejectedResponse(

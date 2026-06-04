@@ -2,7 +2,7 @@ import { ceryxColors } from "@ceryx/design-tokens";
 import type { TrustedDevice } from "@ceryx/client-sdk";
 import { useConnectionStore } from "@ceryx/feature-remote-control";
 import { Button, Panel, StatusChip } from "@ceryx/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   defaultLocalAgentBaseUrl,
@@ -239,6 +239,10 @@ export function HomeRoute() {
   }
 
   const remoteAgents = sortRemoteAgents(trustedDevices, sortKey);
+  const wakeOnLanInfo = useMemo(
+    () => trustedDevices.find((device) => device.wol?.supported)?.wol ?? null,
+    [trustedDevices]
+  );
 
   return (
     <section
@@ -339,6 +343,56 @@ export function HomeRoute() {
               Refresh
             </Button>
           </div>
+
+          <Panel style={{ display: "grid", gap: 10 }}>
+            <div
+              style={{
+                alignItems: "center",
+                display: "flex",
+                justifyContent: "space-between"
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Wake on LAN</h2>
+              <StatusChip tone={wakeOnLanInfo ? "success" : "neutral"}>
+                {wakeOnLanInfo ? "supported" : "unavailable"}
+              </StatusChip>
+            </div>
+            {wakeOnLanInfo ? (
+              <>
+                <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 13 }}>
+                  Broadcast: {wakeOnLanInfo.broadcastAddress}:{wakeOnLanInfo.port}
+                </div>
+                <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 13 }}>
+                  MACs: {wakeOnLanInfo.macAddresses.join(", ")}
+                </div>
+                <Button
+                  size="desktop"
+                  variant="secondary"
+                  style={{ width: "fit-content" }}
+                  onClick={async () => {
+                    const payload = [
+                      `broadcast=${wakeOnLanInfo.broadcastAddress}`,
+                      `port=${wakeOnLanInfo.port}`,
+                      `macs=${wakeOnLanInfo.macAddresses.join(",")}`
+                    ].join("\n");
+
+                    try {
+                      await navigator.clipboard.writeText(payload);
+                      setFeedback("Wake-on-LAN details copied to clipboard.");
+                    } catch {
+                      setFeedback("Unable to copy Wake-on-LAN details.");
+                    }
+                  }}
+                >
+                  Copy Wake Details
+                </Button>
+              </>
+            ) : (
+              <p style={{ color: ceryxColors.onSurfaceVariant, margin: 0 }}>
+                Pair this desktop client to cache Wake-on-LAN details for the local Windows host.
+              </p>
+            )}
+          </Panel>
 
           {feedback ? (
             <Panel

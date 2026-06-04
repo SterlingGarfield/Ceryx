@@ -9,6 +9,7 @@ public sealed record TrustedDeviceRecord(
     string ClientType,
     string TokenHash,
     IReadOnlyList<Permission> Permissions,
+    WakeOnLanInfo? Wol,
     DateTimeOffset CreatedAt
 );
 

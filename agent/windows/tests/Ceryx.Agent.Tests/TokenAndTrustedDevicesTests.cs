@@ -54,6 +54,11 @@ public sealed class TrustedDevicesStoreTests
                 ClientType: "ipad",
                 TokenHash: tokenHash,
                 Permissions: [Permission.ViewWindow, Permission.SendPrompt],
+                Wol: new WakeOnLanInfo(
+                    Supported: true,
+                    MacAddresses: ["AA:BB:CC:DD:EE:FF"],
+                    BroadcastAddress: "192.168.1.255",
+                    Port: 9),
                 CreatedAt: DateTimeOffset.UtcNow);
 
             await store.AddAsync(device);
@@ -61,6 +66,9 @@ public sealed class TrustedDevicesStoreTests
             var found = await store.FindByTokenHashAsync(tokenHash);
             Assert.NotNull(found);
             Assert.Equal(device.DeviceId, found!.DeviceId);
+            Assert.NotNull(found.Wol);
+            Assert.Equal("192.168.1.255", found.Wol!.BroadcastAddress);
+            Assert.Contains("AA:BB:CC:DD:EE:FF", found.Wol.MacAddresses);
 
             var listed = await store.ListAsync();
             Assert.Contains(listed, item => item.DeviceId == device.DeviceId);
@@ -148,7 +156,8 @@ public sealed class PairingTrustedDevicesFlowTests
                 store,
                 new DeviceTokenGenerator(),
                 tokenHasher,
-                new DefaultPermissionPolicy());
+                new DefaultPermissionPolicy(),
+                new FixedWakeOnLanInfoProvider());
 
             var request = await stateMachine.RequestAsync(new PairingRequestContext("My iPad", "ipad", "ios"));
             Assert.True(request.IsAccepted);
@@ -164,11 +173,15 @@ public sealed class PairingTrustedDevicesFlowTests
             Assert.StartsWith("dev_", success.DeviceId, StringComparison.Ordinal);
             Assert.StartsWith("dt_", success.DeviceToken, StringComparison.Ordinal);
             Assert.Contains(Permission.ViewWindow, success.Permissions);
+            Assert.NotNull(success.Wol);
+            Assert.Equal("192.168.1.255", success.Wol!.BroadcastAddress);
 
             var stored = await store.FindByTokenHashAsync(tokenHasher.Hash(success.DeviceToken));
             Assert.NotNull(stored);
             Assert.Equal(success.DeviceId, stored!.DeviceId);
             Assert.NotEqual(success.DeviceToken, stored.TokenHash);
+            Assert.NotNull(stored.Wol);
+            Assert.Equal(success.Wol.BroadcastAddress, stored.Wol!.BroadcastAddress);
         }
         finally
         {
@@ -191,6 +204,18 @@ public sealed class PairingTrustedDevicesFlowTests
         public string GenerateSixDigitCode()
         {
             return _code;
+        }
+    }
+
+    private sealed class FixedWakeOnLanInfoProvider : IWakeOnLanInfoProvider
+    {
+        public WakeOnLanInfo GetWakeOnLanInfo()
+        {
+            return new WakeOnLanInfo(
+                Supported: true,
+                MacAddresses: ["AA:BB:CC:DD:EE:FF"],
+                BroadcastAddress: "192.168.1.255",
+                Port: 9);
         }
     }
 }

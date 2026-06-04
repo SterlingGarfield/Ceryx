@@ -57,6 +57,10 @@ try
     builder.Services.AddSingleton<IPairingClock, SystemPairingClock>();
     builder.Services.AddSingleton<IPairingCodeGenerator, RandomPairingCodeGenerator>();
     builder.Services.AddSingleton<IPairingAuditSink, NoOpPairingAuditSink>();
+    builder.Services.AddSingleton(new WakeOnLanSettings(
+        Enabled: ReadWakeOnLanEnabled(),
+        Port: ReadWakeOnLanPort()));
+    builder.Services.AddSingleton<IWakeOnLanInfoProvider, SystemWakeOnLanInfoProvider>();
     builder.Services.AddSingleton<PairingStateMachine>();
     builder.Services.AddSingleton<SqliteConnectionFactory>();
     builder.Services.AddSingleton<ITrustedDeviceStore, SqliteTrustedDeviceStore>();
@@ -183,6 +187,24 @@ static bool IsAllowedCorsOrigin(string origin)
 
     return IPAddress.TryParse(originUri.Host, out var originIp) &&
            AgentNetworkBindingResolver.IsLanOrLoopback(originIp);
+}
+
+static bool ReadWakeOnLanEnabled()
+{
+    var value = Environment.GetEnvironmentVariable("CERYX_WOL_ENABLED");
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return true;
+    }
+
+    return !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase) &&
+           !string.Equals(value, "0", StringComparison.OrdinalIgnoreCase);
+}
+
+static int ReadWakeOnLanPort()
+{
+    var value = Environment.GetEnvironmentVariable("CERYX_WOL_PORT");
+    return int.TryParse(value, out var port) && port is > 0 and <= 65535 ? port : 9;
 }
 
 public partial class Program;

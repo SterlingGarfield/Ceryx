@@ -2,11 +2,19 @@ using System.Text.Json.Serialization;
 
 namespace Ceryx.Agent.Core;
 
+public sealed record WakeOnLanInfo(
+    [property: JsonPropertyName("supported")] bool Supported,
+    [property: JsonPropertyName("macAddresses")] IReadOnlyList<string> MacAddresses,
+    [property: JsonPropertyName("broadcastAddress")] string BroadcastAddress,
+    [property: JsonPropertyName("port")] int Port
+);
+
 public sealed record TrustedDeviceResponse(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("platform")] string Platform,
     [property: JsonPropertyName("permissions")] IReadOnlyList<string> Permissions,
+    [property: JsonPropertyName("wol")] WakeOnLanInfo? Wol,
     [property: JsonPropertyName("autoConnect")] bool AutoConnect,
     [property: JsonPropertyName("createdAt")] string CreatedAt,
     [property: JsonPropertyName("lastConnectedAt")] string? LastConnectedAt

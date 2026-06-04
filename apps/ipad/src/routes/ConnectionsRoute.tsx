@@ -9,11 +9,13 @@ import {
   listTrustedDevices,
   probeAgent
 } from "../platform/ipad/agentGateway";
+import { readTrustedDevicesCache } from "@ceryx/feature-remote-control";
 import {
   normalizeAgentBaseUrl,
   resolveDefaultAgentBaseUrl
 } from "../platform/ipad/defaultAgentBaseUrl";
 import { localNetworkGuidance } from "../platform/ipad/localNetworkGuidance";
+import { wakeAgent } from "../platform/ipad/wakeOnLan";
 
 function resolveDefaultBaseUrls(): string[] {
   return [resolveDefaultAgentBaseUrl()];
@@ -34,6 +36,8 @@ export function ConnectionsRoute() {
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState("");
+  const [wakeError, setWakeError] = useState("");
+  const [wakeInFlightBaseUrl, setWakeInFlightBaseUrl] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState === "visible"
   );
@@ -83,6 +87,17 @@ export function ConnectionsRoute() {
       setIsRefreshing(false);
     }
   }, [candidates, currentDevice?.baseUrl, setAgentStatus, setLatency]);
+
+  const cachedWakeTargets = useMemo(() => {
+    return new Map(
+      candidates.map((baseUrl) => [
+        baseUrl,
+        readTrustedDevicesCache(baseUrl).find(
+          (device) => device.wol?.supported && device.wol.macAddresses.length > 0
+        )
+      ])
+    );
+  }, [candidates, trustedDevices]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -141,6 +156,11 @@ export function ConnectionsRoute() {
       {refreshError ? (
         <Panel size="ipad" style={{ marginBottom: 14 }}>
           <p style={{ color: ceryxColors.error, margin: 0 }}>{refreshError}</p>
+        </Panel>
+      ) : null}
+      {wakeError ? (
+        <Panel size="ipad" style={{ marginBottom: 14 }}>
+          <p style={{ color: ceryxColors.error, margin: 0 }}>{wakeError}</p>
         </Panel>
       ) : null}
 
@@ -215,6 +235,11 @@ export function ConnectionsRoute() {
                 {!probe.reachable ? (
                   <div style={{ color: ceryxColors.error, fontSize: 12 }}>{probe.message}</div>
                 ) : null}
+                {!probe.reachable && cachedWakeTargets.get(probe.baseUrl)?.wol?.supported ? (
+                  <div style={{ color: ceryxColors.onSurfaceVariant, fontSize: 12 }}>
+                    Cached WoL metadata is available for this agent.
+                  </div>
+                ) : null}
                 <div style={{ display: "flex", gap: 10 }}>
                   <Button
                     size="ipad"
@@ -246,9 +271,61 @@ export function ConnectionsRoute() {
                       });
                       navigate("/console");
                     }}
-                  >
-                    Open Console
-                  </Button>
+                    >
+                      Open Console
+                    </Button>
+                  {!probe.reachable && cachedWakeTargets.get(probe.baseUrl)?.wol?.supported ? (
+                    <Button
+                      size="ipad"
+                      variant="secondary"
+                      style={{ minWidth: 150 }}
+                      disabled={wakeInFlightBaseUrl === probe.baseUrl}
+                    onClick={() => {
+                        const wakeTarget = cachedWakeTargets.get(probe.baseUrl);
+                        const wol = wakeTarget?.wol;
+                        if (!wol) {
+                          return;
+                        }
+
+                        setWakeError("");
+                        setWakeInFlightBaseUrl(probe.baseUrl);
+                        void (async () => {
+                          try {
+                            const wakeResult = await wakeAgent({
+                              baseUrl: probe.baseUrl,
+                              deviceName: probe.deviceName,
+                              wol
+                            });
+
+                            if (wakeResult.woke) {
+                              setCurrentDevice({
+                                deviceId: `device:${probe.baseUrl}`,
+                                deviceName: probe.deviceName,
+                                platform: "windows",
+                                baseUrl: probe.baseUrl
+                              });
+                              navigate("/console");
+                              return;
+                            }
+
+                            setWakeError(
+                              `Sent Wake-on-LAN packets to ${probe.deviceName}, but it did not come online within 90 seconds.`
+                            );
+                          } catch (error) {
+                            setWakeError(
+                              error instanceof Error
+                                ? error.message
+                                : "Failed to send Wake-on-LAN packets."
+                            );
+                          } finally {
+                            setWakeInFlightBaseUrl(null);
+                          }
+                        })();
+                      }}
+                    >
+                      {wakeInFlightBaseUrl === probe.baseUrl ? "Waking..." : "Wake Agent"}
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             ))

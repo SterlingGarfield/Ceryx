@@ -48,6 +48,7 @@ internal static class AuthTestHelper
             ClientType: clientType,
             TokenHash: hasher.Hash(token),
             Permissions: permissions,
+            Wol: null,
             CreatedAt: DateTimeOffset.UtcNow));
 
         var client = factory.CreateClient();

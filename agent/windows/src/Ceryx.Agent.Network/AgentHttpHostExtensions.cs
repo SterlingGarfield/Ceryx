@@ -584,7 +584,8 @@ public static class AgentHttpHostExtensions
             Ok: true,
             DeviceId: result.Success.DeviceId,
             DeviceToken: result.Success.DeviceToken,
-            Permissions: result.Success.Permissions.Select(static permission => permission.ToWireValue()).ToArray()));
+            Permissions: result.Success.Permissions.Select(static permission => permission.ToWireValue()).ToArray(),
+            Wol: result.Success.Wol));
     }
 
     private static async Task<IResult> ListDevicesHandler(
@@ -597,6 +598,7 @@ public static class AgentHttpHostExtensions
             Name: device.Name,
             Platform: device.Platform,
             Permissions: device.Permissions.Select(static permission => permission.ToWireValue()).ToArray(),
+            Wol: device.Wol,
             AutoConnect: true,
             CreatedAt: device.CreatedAt.ToString("O"),
             LastConnectedAt: null));

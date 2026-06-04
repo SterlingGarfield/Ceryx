@@ -46,6 +46,10 @@ import {
   writeDeviceToken
 } from "./tokenVault";
 import {
+  readTrustedDevicesCache,
+  writeTrustedDevicesCache
+} from "@ceryx/feature-remote-control";
+import {
   openLogsFolderViaShell,
   restartLocalAgentViaShell,
   startLocalAgentViaShell
@@ -140,13 +144,15 @@ export async function listTrustedDevices(
   baseUrl = defaultLocalAgentBaseUrl
 ): Promise<TrustedDevice[]> {
   if (!readDeviceToken(baseUrl)) {
-    return [];
+    return readTrustedDevicesCache(baseUrl);
   }
 
   try {
-    return await createClient(baseUrl).listDevices();
+    const devices = await createClient(baseUrl).listDevices();
+    writeTrustedDevicesCache(baseUrl, devices);
+    return devices;
   } catch {
-    return [];
+    return readTrustedDevicesCache(baseUrl);
   }
 }
 

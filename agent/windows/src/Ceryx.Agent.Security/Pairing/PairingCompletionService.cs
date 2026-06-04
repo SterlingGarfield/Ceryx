@@ -7,7 +7,8 @@ namespace Ceryx.Agent.Security.Pairing;
 public sealed record PairingCompletionSuccess(
     string DeviceId,
     string DeviceToken,
-    IReadOnlyList<Permission> Permissions
+    IReadOnlyList<Permission> Permissions,
+    WakeOnLanInfo? Wol
 );
 
 public sealed record PairingCompletionResult(
@@ -26,19 +27,22 @@ public sealed class PairingCompletionService
     private readonly IDeviceTokenGenerator _tokenGenerator;
     private readonly IDeviceTokenHasher _tokenHasher;
     private readonly IDefaultPermissionPolicy _permissionPolicy;
+    private readonly IWakeOnLanInfoProvider _wakeOnLanInfoProvider;
 
     public PairingCompletionService(
         PairingStateMachine stateMachine,
         ITrustedDeviceStore trustedDeviceStore,
         IDeviceTokenGenerator tokenGenerator,
         IDeviceTokenHasher tokenHasher,
-        IDefaultPermissionPolicy permissionPolicy)
+        IDefaultPermissionPolicy permissionPolicy,
+        IWakeOnLanInfoProvider wakeOnLanInfoProvider)
     {
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _trustedDeviceStore = trustedDeviceStore ?? throw new ArgumentNullException(nameof(trustedDeviceStore));
         _tokenGenerator = tokenGenerator ?? throw new ArgumentNullException(nameof(tokenGenerator));
         _tokenHasher = tokenHasher ?? throw new ArgumentNullException(nameof(tokenHasher));
         _permissionPolicy = permissionPolicy ?? throw new ArgumentNullException(nameof(permissionPolicy));
+        _wakeOnLanInfoProvider = wakeOnLanInfoProvider ?? throw new ArgumentNullException(nameof(wakeOnLanInfoProvider));
     }
 
     public async Task<PairingCompletionResult> ConfirmAsync(
@@ -67,6 +71,7 @@ public sealed class PairingCompletionService
         var deviceToken = _tokenGenerator.GenerateToken();
         var tokenHash = _tokenHasher.Hash(deviceToken);
         var deviceId = "dev_" + Guid.NewGuid().ToString("N");
+        var wol = _wakeOnLanInfoProvider.GetWakeOnLanInfo();
 
         var trustedDevice = new TrustedDeviceRecord(
             DeviceId: deviceId,
@@ -75,6 +80,7 @@ public sealed class PairingCompletionService
             ClientType: clientType,
             TokenHash: tokenHash,
             Permissions: permissions,
+            Wol: wol,
             CreatedAt: DateTimeOffset.UtcNow);
 
         await _trustedDeviceStore.AddAsync(trustedDevice, cancellationToken);
@@ -87,6 +93,7 @@ public sealed class PairingCompletionService
             Success: new PairingCompletionSuccess(
                 DeviceId: deviceId,
                 DeviceToken: deviceToken,
-                Permissions: permissions));
+                Permissions: permissions,
+                Wol: wol));
     }
 }

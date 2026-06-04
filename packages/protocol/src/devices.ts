@@ -1,5 +1,12 @@
 import type { CeryxPermission } from "./permissions.js";
 
+export interface WakeOnLanInfo {
+  supported: boolean;
+  macAddresses: string[];
+  broadcastAddress: string;
+  port: number;
+}
+
 export const ClientTypes = ["ipad", "desktop"] as const;
 export type ClientType = (typeof ClientTypes)[number];
 
@@ -55,6 +62,7 @@ export interface TrustedDevice {
   name: string;
   platform: string;
   permissions: CeryxPermission[];
+  wol?: WakeOnLanInfo;
   autoConnect: boolean;
   createdAt: string;
   lastConnectedAt?: string;

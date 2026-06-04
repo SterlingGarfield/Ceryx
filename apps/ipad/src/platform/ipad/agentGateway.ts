@@ -49,6 +49,10 @@ import {
   readDeviceToken,
   writeDeviceToken
 } from "./tokenVault";
+import {
+  readTrustedDevicesCache,
+  writeTrustedDevicesCache
+} from "@ceryx/feature-remote-control";
 
 export interface AgentProbeResult {
   baseUrl: string;
@@ -128,13 +132,15 @@ export async function probeAgent(baseUrl: string): Promise<AgentProbeResult> {
 
 export async function listTrustedDevices(baseUrl: string): Promise<TrustedDevice[]> {
   if (!readDeviceToken(baseUrl)) {
-    return [];
+    return readTrustedDevicesCache(baseUrl);
   }
 
   try {
-    return await createClient(baseUrl).listDevices();
+    const devices = await createClient(baseUrl).listDevices();
+    writeTrustedDevicesCache(baseUrl, devices);
+    return devices;
   } catch {
-    return [];
+    return readTrustedDevicesCache(baseUrl);
   }
 }
 
