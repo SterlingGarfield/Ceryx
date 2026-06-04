@@ -65,6 +65,61 @@ public sealed class WindowLocatorTests
         Assert.Equal(2, windows!.Cast<object>().Count());
     }
 
+    [Fact]
+    public async Task WindowLocator_ListWindows_ReactsToWindowCreateAndDestroy()
+    {
+        var probe = new MutableProbe(
+        [
+            new CodexWindowCandidate("w1", "Codex A", "codex", true, false)
+        ]);
+        var locator = new CodexWindowLocator(probe);
+
+        var initial = await locator.ListWindowsAsync();
+        Assert.Equal(1, initial.TotalCount);
+        Assert.Equal("w1", initial.ActiveWindowId);
+
+        probe.SetCandidates([
+            new CodexWindowCandidate("w1", "Codex A", "codex", false, false),
+            new CodexWindowCandidate("w2", "Codex B", "codex", true, false)
+        ]);
+
+        var created = await locator.ListWindowsAsync();
+        Assert.Equal(2, created.TotalCount);
+        Assert.Equal("w2", created.ActiveWindowId);
+
+        probe.SetCandidates([
+            new CodexWindowCandidate("w2", "Codex B", "codex", true, false)
+        ]);
+
+        var destroyed = await locator.ListWindowsAsync();
+        Assert.Equal(1, destroyed.TotalCount);
+        Assert.Equal("w2", destroyed.ActiveWindowId);
+    }
+
+    [Fact]
+    public async Task WindowLocator_RefreshAsync_FallsBackWhenSelectedWindowDisappears()
+    {
+        var probe = new MutableProbe(
+        [
+            new CodexWindowCandidate("w1", "Codex A", "codex", true, false),
+            new CodexWindowCandidate("w2", "Codex B", "codex", false, false)
+        ]);
+        var locator = new CodexWindowLocator(probe);
+
+        var selected = await locator.SelectWindowAsync("w2");
+        Assert.Equal("found", selected.Status);
+        Assert.Equal("w2", selected.WindowId);
+
+        probe.SetCandidates([
+            new CodexWindowCandidate("w1", "Codex A", "codex", true, false)
+        ]);
+
+        var refreshed = await locator.RefreshAsync();
+        Assert.Equal("focused", refreshed.Status);
+        Assert.Equal("w1", refreshed.WindowId);
+        Assert.Equal(1, refreshed.CandidateCount);
+    }
+
     private sealed class FakeProbe : ICodexWindowProbe
     {
         private readonly IReadOnlyList<CodexWindowCandidate> _candidates;
@@ -77,6 +132,33 @@ public sealed class WindowLocatorTests
         public Task<IReadOnlyList<CodexWindowCandidate>> ProbeAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(_candidates);
+        }
+    }
+
+    private sealed class MutableProbe : ICodexWindowProbe
+    {
+        private readonly object _sync = new();
+        private IReadOnlyList<CodexWindowCandidate> _candidates;
+
+        public MutableProbe(IReadOnlyList<CodexWindowCandidate> candidates)
+        {
+            _candidates = candidates;
+        }
+
+        public void SetCandidates(IReadOnlyList<CodexWindowCandidate> candidates)
+        {
+            lock (_sync)
+            {
+                _candidates = candidates;
+            }
+        }
+
+        public Task<IReadOnlyList<CodexWindowCandidate>> ProbeAsync(CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                return Task.FromResult(_candidates);
+            }
         }
     }
 }

@@ -74,9 +74,15 @@ try
     builder.Services.AddSingleton<IClipboardService, WindowsClipboardService>();
     builder.Services.AddSingleton<IPromptBridgeService, PromptBridgeService>();
     builder.Services.AddSingleton<IImagePasteService, NoOpImagePasteService>();
-    builder.Services.AddSingleton<ICaptureLifecycleService, InMemoryCaptureLifecycleService>();
+    builder.Services.AddSingleton<InMemoryCaptureLifecycleService>();
+    builder.Services.AddSingleton<ICaptureLifecycleService>(serviceProvider =>
+        serviceProvider.GetRequiredService<InMemoryCaptureLifecycleService>());
     builder.Services.AddSingleton<ICaptureSignalClock, SystemCaptureSignalClock>();
-    builder.Services.AddSingleton<ICaptureSignalService, CaptureSignalService>();
+    builder.Services.AddSingleton<CaptureSignalService>();
+    builder.Services.AddSingleton<ICaptureSignalService>(serviceProvider =>
+        serviceProvider.GetRequiredService<CaptureSignalService>());
+    builder.Services.AddSingleton<ICaptureConnectionStatsProvider>(serviceProvider =>
+        serviceProvider.GetRequiredService<CaptureSignalService>());
     builder.Services.AddSingleton<IDiskSpaceProvider, DriveDiskSpaceProvider>();
     builder.Services.AddSingleton<WindowImageCapture>();
     builder.Services.AddSingleton<IWindowImageCapture>(serviceProvider =>

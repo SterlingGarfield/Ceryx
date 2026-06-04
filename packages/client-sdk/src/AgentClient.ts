@@ -7,6 +7,7 @@ import type {
   AgentSettingsPatch,
   AgentPathsResponse,
   AgentStatus,
+  ConnectionStatsResponse,
   CaptureSignalRequest,
   CaptureSignalResponse,
   CaptureStartRequest,
@@ -202,6 +203,12 @@ export class AgentClient {
 
   async agentPaths(): Promise<AgentPathsResponse> {
     return this.request<AgentPathsResponse>("/api/v1/agent/paths", { auth: true });
+  }
+
+  async getConnectionStats(): Promise<ConnectionStatsResponse> {
+    return this.request<ConnectionStatsResponse>("/api/v1/agent/connection-stats", {
+      auth: true
+    });
   }
 
   async listDevices(): Promise<TrustedDevice[]> {

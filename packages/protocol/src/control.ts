@@ -127,6 +127,33 @@ export interface CaptureStateResponse {
   recordingAudioActive?: boolean;
 }
 
+export interface ConnectionViewportStats {
+  currentTier: string;
+  resolution: string;
+  fps: number;
+  bitrateKbps: number;
+  packetsLost: number;
+  packetsSent: number;
+  packetLossPercent: number;
+  roundTripTimeMs: number;
+  jitterMs: number;
+}
+
+export interface ConnectionAgentStats {
+  cpuPercent: number;
+  memoryMB: number;
+  uptimeSeconds: number;
+}
+
+export interface ConnectionStatsResponse {
+  ok: boolean;
+  observedAt: string;
+  connectedSince: string;
+  activeViewers: number;
+  viewportStats: ConnectionViewportStats;
+  agentStats: ConnectionAgentStats;
+}
+
 export interface RecordingStartRequest {
   confirmHighRisk?: boolean;
   includeAudio?: boolean;

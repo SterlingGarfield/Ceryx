@@ -13,6 +13,7 @@ using Ceryx.Agent.Storage;
 using Ceryx.Agent.Storage.Audit;
 using Ceryx.Agent.Storage.Notifications;
 using Ceryx.Agent.Storage.Settings;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -111,6 +112,14 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth();
         app.MapGet("/api/v1/agent/paths", () => AgentPathsHandler(localPaths))
             .RequireAgentAuth();
+        app.MapGet(
+            "/api/v1/agent/connection-stats",
+            (
+                AgentRuntimeState runtimeState,
+                ICaptureLifecycleService captureLifecycleService,
+                ICaptureConnectionStatsProvider connectionStatsProvider) =>
+                ConnectionStatsHandler(runtimeState, captureLifecycleService, connectionStatsProvider))
+            .RequireAgentAuth(Permission.ViewWindow);
 
         app.MapGet(
             "/api/v1/codex/window",
@@ -379,6 +388,40 @@ public static class AgentHttpHostExtensions
             Screenshots: localPaths.Screenshots,
             Recordings: localPaths.Recordings,
             Database: localPaths.Database));
+    }
+
+    private static Ok<ConnectionStatsResponse> ConnectionStatsHandler(
+        AgentRuntimeState runtimeState,
+        ICaptureLifecycleService captureLifecycleService,
+        ICaptureConnectionStatsProvider connectionStatsProvider)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var captureStats = captureLifecycleService.GetConnectionStatsSnapshot();
+        var connectedSince = connectionStatsProvider.ConnectedSince ?? runtimeState.StartedAt;
+        using var process = Process.GetCurrentProcess();
+        var uptime = now - runtimeState.StartedAt;
+        var cpuPercent = ResolveProcessCpuPercent(process, uptime);
+        var memoryMB = process.WorkingSet64 / 1024d / 1024d;
+
+        return TypedResults.Ok(new ConnectionStatsResponse(
+            Ok: true,
+            ObservedAt: now.ToString("O"),
+            ConnectedSince: connectedSince.ToString("O"),
+            ActiveViewers: connectionStatsProvider.ActiveSessionCount,
+            ViewportStats: new ConnectionViewportStatsResponse(
+                CurrentTier: captureStats.CurrentTier,
+                Resolution: captureStats.Resolution,
+                Fps: captureStats.FrameRate,
+                BitrateKbps: Math.Round(captureStats.BitrateKbps, 1),
+                PacketsLost: captureStats.PacketsLost,
+                PacketsSent: captureStats.PacketsSent,
+                PacketLossPercent: Math.Round(captureStats.PacketLossPercent, 1),
+                RoundTripTimeMs: Math.Round(captureStats.RoundTripTimeMs, 1),
+                JitterMs: Math.Round(captureStats.JitterMs, 1)),
+            AgentStats: new ConnectionAgentStatsResponse(
+                CpuPercent: Math.Round(cpuPercent, 1),
+                MemoryMB: Math.Round(memoryMB, 1),
+                UptimeSeconds: Math.Max(0d, uptime.TotalSeconds))));
     }
 
     private static async Task<IResult> PairingRequestHandler(
@@ -2136,6 +2179,18 @@ public static class AgentHttpHostExtensions
         }
 
         return 1200;
+    }
+
+    private static double ResolveProcessCpuPercent(Process process, TimeSpan uptime)
+    {
+        if (uptime.TotalMilliseconds <= 0)
+        {
+            return 0;
+        }
+
+        var cpuMilliseconds = process.TotalProcessorTime.TotalMilliseconds;
+        var percent = cpuMilliseconds / uptime.TotalMilliseconds / Environment.ProcessorCount * 100d;
+        return Math.Max(0d, percent);
     }
 
     private static async Task WriteAuditAsync(

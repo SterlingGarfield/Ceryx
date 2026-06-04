@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Ceryx.Agent.Capture;
 
-public sealed class CaptureSignalService : ICaptureSignalService, IAsyncDisposable
+public sealed class CaptureSignalService : ICaptureSignalService, ICaptureConnectionStatsProvider, IAsyncDisposable
 {
     private static readonly TimeSpan SessionTtl = TimeSpan.FromSeconds(60);
 
@@ -71,6 +71,15 @@ public sealed class CaptureSignalService : ICaptureSignalService, IAsyncDisposab
     }
 
     public int ActiveSessionCount => _sessions.Count;
+
+    public DateTimeOffset? ConnectedSince
+    {
+        get
+        {
+            var session = _sessions.Values.OrderBy(static item => item.CreatedAt).FirstOrDefault();
+            return session?.CreatedAt;
+        }
+    }
 
     public async Task<CaptureSignalResponse> SubmitSignalAsync(
         CaptureSignalBody body,

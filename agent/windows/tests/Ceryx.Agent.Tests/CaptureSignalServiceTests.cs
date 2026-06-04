@@ -337,5 +337,19 @@ public sealed class CaptureSignalServiceTests
             CurrentState = CurrentState with { Paused = false };
             return Task.FromResult(new CapturePolicyResult(CurrentState, RenegotiationNeeded: true));
         }
+
+        public CaptureConnectionStatsSnapshot GetConnectionStatsSnapshot()
+        {
+            return new CaptureConnectionStatsSnapshot(
+                CurrentTier: "high",
+                Resolution: "1280x720",
+                FrameRate: 30,
+                BitrateKbps: 0,
+                PacketsLost: 0,
+                PacketsSent: 0,
+                PacketLossPercent: 0,
+                RoundTripTimeMs: 0,
+                JitterMs: 0);
+        }
     }
 }

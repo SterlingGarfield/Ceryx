@@ -136,16 +136,18 @@ public sealed class CodexWindowLocator : ICodexWindowLocator
         }
 
         CodexWindowCandidate? selected = null;
+        var hasExplicitSelection = false;
         lock (_sync)
         {
             if (!string.IsNullOrWhiteSpace(_selectedWindowId))
             {
+                hasExplicitSelection = true;
                 selected = candidates.FirstOrDefault(candidate =>
                     string.Equals(candidate.WindowId, _selectedWindowId, StringComparison.OrdinalIgnoreCase));
             }
         }
 
-        if (selected is null && candidates.Count > 1)
+        if (selected is null && candidates.Count > 1 && !hasExplicitSelection)
         {
             return new CodexWindowSnapshot(
                 Status: "multiple_candidates",
@@ -156,7 +158,9 @@ public sealed class CodexWindowLocator : ICodexWindowLocator
                 LastUpdatedAt: now);
         }
 
-        var winner = selected ?? candidates[0];
+        var winner = selected
+            ?? candidates.FirstOrDefault(candidate => candidate.IsFocused)
+            ?? candidates[0];
         var status = winner.IsMinimized
             ? "minimized"
             : (focusedOverride || winner.IsFocused ? "focused" : "found");

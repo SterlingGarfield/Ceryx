@@ -316,6 +316,33 @@ public sealed record CaptureStateResponse(
     [property: JsonPropertyName("recordingAudioActive")] bool RecordingAudioActive
 );
 
+public sealed record ConnectionViewportStatsResponse(
+    [property: JsonPropertyName("currentTier")] string CurrentTier,
+    [property: JsonPropertyName("resolution")] string Resolution,
+    [property: JsonPropertyName("fps")] int Fps,
+    [property: JsonPropertyName("bitrateKbps")] double BitrateKbps,
+    [property: JsonPropertyName("packetsLost")] long PacketsLost,
+    [property: JsonPropertyName("packetsSent")] long PacketsSent,
+    [property: JsonPropertyName("packetLossPercent")] double PacketLossPercent,
+    [property: JsonPropertyName("roundTripTimeMs")] double RoundTripTimeMs,
+    [property: JsonPropertyName("jitterMs")] double JitterMs
+);
+
+public sealed record ConnectionAgentStatsResponse(
+    [property: JsonPropertyName("cpuPercent")] double CpuPercent,
+    [property: JsonPropertyName("memoryMB")] double MemoryMB,
+    [property: JsonPropertyName("uptimeSeconds")] double UptimeSeconds
+);
+
+public sealed record ConnectionStatsResponse(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("observedAt")] string ObservedAt,
+    [property: JsonPropertyName("connectedSince")] string ConnectedSince,
+    [property: JsonPropertyName("activeViewers")] int ActiveViewers,
+    [property: JsonPropertyName("viewportStats")] ConnectionViewportStatsResponse ViewportStats,
+    [property: JsonPropertyName("agentStats")] ConnectionAgentStatsResponse AgentStats
+);
+
 public sealed record RecordingStartBody
 {
     [property: JsonPropertyName("confirmHighRisk")]

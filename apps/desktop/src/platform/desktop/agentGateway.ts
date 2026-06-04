@@ -13,6 +13,7 @@ import {
   type CaptureSignalResponse,
   type CaptureMode,
   type CaptureStateResponse,
+  type ConnectionStatsResponse,
   type CodexWindowListResponse,
   type CodexSelectWindowRequest,
   type CodexWindowSnapshot,
@@ -159,6 +160,12 @@ export async function listCodexWindows(
   baseUrl = defaultLocalAgentBaseUrl
 ): Promise<CodexWindowListResponse> {
   return getClient(baseUrl).listCodexWindows();
+}
+
+export async function requestConnectionStats(
+  baseUrl = defaultLocalAgentBaseUrl
+): Promise<ConnectionStatsResponse> {
+  return getClient(baseUrl).getConnectionStats();
 }
 
 export async function refreshCodexWindow(

@@ -5,6 +5,7 @@ export * from "./CodexWindowSwitcher.js";
 export * from "./clipboardBridge.js";
 export * from "./RecordingPanel.js";
 export * from "./PromptComposer.js";
+export * from "./ConnectionQualityIndicator.js";
 export * from "./RemoteViewport.js";
 export * from "./ViewportQualityIndicator.js";
 export * from "./gestureEngine.js";

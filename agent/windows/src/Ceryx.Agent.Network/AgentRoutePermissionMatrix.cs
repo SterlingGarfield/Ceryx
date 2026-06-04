@@ -21,6 +21,7 @@ public static class AgentRoutePermissionMatrix
         new("DELETE", "/api/v1/devices/{deviceId}", false, Permission.ManageDevices),
         new("GET", "/api/v1/agent/status", false, null),
         new("GET", "/api/v1/agent/paths", false, null),
+        new("GET", "/api/v1/agent/connection-stats", false, Permission.ViewWindow),
         new("GET", "/api/v1/codex/window", false, Permission.ViewWindow),
         new("GET", "/api/v1/codex/windows", false, Permission.ViewWindow),
         new("POST", "/api/v1/codex/focus", false, Permission.ControlInput),

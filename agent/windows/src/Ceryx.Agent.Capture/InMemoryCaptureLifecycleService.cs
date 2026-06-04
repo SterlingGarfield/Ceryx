@@ -56,6 +56,9 @@ public sealed class InMemoryCaptureLifecycleService : ICaptureLifecycleService
     private double? _bandwidthEstimateKbps;
     private double? _roundTripTimeEstimateMs;
     private double? _packetLossEstimatePercent;
+    private double? _jitterEstimateMs;
+    private long? _packetsLostEstimate;
+    private long? _packetsSentEstimate;
     private DateTimeOffset? _cpuHighSince;
     private DateTimeOffset? _jitterHighSince;
     private DateTimeOffset? _viewerSeenAt;
@@ -128,6 +131,9 @@ public sealed class InMemoryCaptureLifecycleService : ICaptureLifecycleService
             _bandwidthEstimateKbps = null;
             _roundTripTimeEstimateMs = null;
             _packetLossEstimatePercent = null;
+            _jitterEstimateMs = null;
+            _packetsLostEstimate = null;
+            _packetsSentEstimate = null;
             _tier = ResolveInitialTier(normalizedMode);
 
             _state = new CaptureState(
@@ -190,6 +196,23 @@ public sealed class InMemoryCaptureLifecycleService : ICaptureLifecycleService
         }
     }
 
+    public CaptureConnectionStatsSnapshot GetConnectionStatsSnapshot()
+    {
+        lock (_sync)
+        {
+            return new CaptureConnectionStatsSnapshot(
+                CurrentTier: ResolveTierName(_tier),
+                Resolution: $"{_state.Width}x{_state.Height}",
+                FrameRate: _state.FrameRate,
+                BitrateKbps: Math.Max(0, _bandwidthEstimateKbps ?? 0),
+                PacketsLost: Math.Max(0, _packetsLostEstimate ?? 0),
+                PacketsSent: Math.Max(0, _packetsSentEstimate ?? 0),
+                PacketLossPercent: Math.Max(0, _packetLossEstimatePercent ?? 0),
+                RoundTripTimeMs: Math.Max(0, _roundTripTimeEstimateMs ?? 0),
+                JitterMs: Math.Max(0, _jitterEstimateMs ?? 0));
+        }
+    }
+
     private static string NormalizeMode(string? mode)
     {
         return mode?.ToLowerInvariant() switch
@@ -215,6 +238,16 @@ public sealed class InMemoryCaptureLifecycleService : ICaptureLifecycleService
             _packetLossEstimatePercent = Smooth(_packetLossEstimatePercent, packetLossSample.Value, PacketLossEwmaAlpha);
         }
 
+        if (signal.PacketsLost is not null)
+        {
+            _packetsLostEstimate = signal.PacketsLost.Value;
+        }
+
+        if (signal.PacketsSent is not null)
+        {
+            _packetsSentEstimate = signal.PacketsSent.Value;
+        }
+
         if (signal.AvailableOutgoingBitrateKbps is > 0)
         {
             _bandwidthEstimateKbps = Smooth(_bandwidthEstimateKbps, signal.AvailableOutgoingBitrateKbps.Value, BandwidthEwmaAlpha);
@@ -227,6 +260,11 @@ public sealed class InMemoryCaptureLifecycleService : ICaptureLifecycleService
         else if (signal.NetworkJitterMs > 0)
         {
             _roundTripTimeEstimateMs = Smooth(_roundTripTimeEstimateMs, signal.NetworkJitterMs, RoundTripTimeEwmaAlpha);
+        }
+
+        if (signal.NetworkJitterMs > 0)
+        {
+            _jitterEstimateMs = Smooth(_jitterEstimateMs, signal.NetworkJitterMs, RoundTripTimeEwmaAlpha);
         }
 
         var immediateLow = packetLossSample is > PacketLossImmediateDowngradeThresholdPercent;
@@ -423,6 +461,9 @@ public sealed class InMemoryCaptureLifecycleService : ICaptureLifecycleService
         _bandwidthEstimateKbps = null;
         _roundTripTimeEstimateMs = null;
         _packetLossEstimatePercent = null;
+        _jitterEstimateMs = null;
+        _packetsLostEstimate = null;
+        _packetsSentEstimate = null;
         _tier = ResolveInitialTier(mode);
 
         return new CaptureState(
@@ -444,6 +485,16 @@ public sealed class InMemoryCaptureLifecycleService : ICaptureLifecycleService
             "low_latency" => AdaptiveTier.High,
             "power_save" => AdaptiveTier.Low,
             _ => AdaptiveTier.Medium
+        };
+    }
+
+    private static string ResolveTierName(AdaptiveTier tier)
+    {
+        return tier switch
+        {
+            AdaptiveTier.High => "high",
+            AdaptiveTier.Medium => "medium",
+            _ => "low"
         };
     }
 

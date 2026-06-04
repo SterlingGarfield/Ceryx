@@ -12,6 +12,7 @@ export type PublicApiRoute = (typeof PublicApiRoutes)[number];
 export const ProtectedApiRoutes = [
   "GET /api/v1/agent/status",
   "GET /api/v1/agent/paths",
+  "GET /api/v1/agent/connection-stats",
   "POST /api/v1/pairing/confirm",
   "POST /api/v1/auth/connect",
   "GET /api/v1/devices",
@@ -72,6 +73,7 @@ export interface RoutePermission {
 export const RoutePermissions: RoutePermission[] = [
   { route: "GET /api/v1/agent/status" },
   { route: "GET /api/v1/agent/paths" },
+  { route: "GET /api/v1/agent/connection-stats" },
   { route: "POST /api/v1/pairing/confirm" },
   { route: "POST /api/v1/auth/connect" },
   { route: "GET /api/v1/devices", permission: "manage_devices" },

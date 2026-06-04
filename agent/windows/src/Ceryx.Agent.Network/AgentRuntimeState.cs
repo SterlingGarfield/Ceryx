@@ -5,6 +5,7 @@ namespace Ceryx.Agent.Network;
 public sealed class AgentRuntimeState
 {
     private readonly object _sync = new();
+    private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
     private AgentRuntimeStatus _status = AgentRuntimeStatus.Running;
 
     public AgentRuntimeStatus GetStatus()
@@ -32,4 +33,6 @@ public sealed class AgentRuntimeState
             return _status;
         }
     }
+
+    public DateTimeOffset StartedAt => _startedAt;
 }

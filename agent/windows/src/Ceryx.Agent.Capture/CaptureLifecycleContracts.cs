@@ -34,6 +34,18 @@ public sealed record CapturePolicyResult(
     string? Reason = null
 );
 
+public sealed record CaptureConnectionStatsSnapshot(
+    string CurrentTier,
+    string Resolution,
+    int FrameRate,
+    double BitrateKbps,
+    long PacketsLost,
+    long PacketsSent,
+    double PacketLossPercent,
+    double RoundTripTimeMs,
+    double JitterMs
+);
+
 public interface ICaptureLifecycleService
 {
     Task<Result<CaptureState>> StartAsync(
@@ -48,6 +60,15 @@ public interface ICaptureLifecycleService
         CancellationToken cancellationToken = default);
 
     CaptureState CurrentState { get; }
+
+    CaptureConnectionStatsSnapshot GetConnectionStatsSnapshot();
+}
+
+public interface ICaptureConnectionStatsProvider
+{
+    int ActiveSessionCount { get; }
+
+    DateTimeOffset? ConnectedSince { get; }
 }
 
 public interface ICaptureSignalService

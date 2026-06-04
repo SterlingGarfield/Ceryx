@@ -91,6 +91,46 @@ describe("AgentClient runtime", () => {
     expect(calls[0]?.init?.method).toBe("GET");
   });
 
+  it("fetches connection stats through the dedicated connection-stats endpoint", async () => {
+    const calls = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          observedAt: "2026-06-05T01:00:00.000Z",
+          connectedSince: "2026-06-05T00:30:00.000Z",
+          activeViewers: 2,
+          viewportStats: {
+            currentTier: "high",
+            resolution: "1920x1080",
+            fps: 30,
+            bitrateKbps: 4500,
+            packetsLost: 0,
+            packetsSent: 420,
+            packetLossPercent: 0,
+            roundTripTimeMs: 4,
+            jitterMs: 1.2
+          },
+          agentStats: {
+            cpuPercent: 5.2,
+            memoryMB: 180,
+            uptimeSeconds: 3600
+          }
+        });
+      }
+    });
+
+    const response = await client.getConnectionStats();
+
+    expect(response.ok).toBe(true);
+    expect(response.activeViewers).toBe(2);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/agent/connection-stats");
+    expect(calls[0]?.init?.method).toBe("GET");
+  });
+
   it("includes window ids when starting capture for a specific Codex window", async () => {
     const calls = [];
     const client = new AgentClient({

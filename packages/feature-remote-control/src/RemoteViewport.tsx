@@ -1,7 +1,8 @@
 import { ceryxColors } from "@ceryx/design-tokens";
-import type { CaptureStateResponse } from "@ceryx/protocol";
+import type { CaptureStateResponse, ConnectionStatsResponse } from "@ceryx/client-sdk";
 import { Button, Panel, StatusChip } from "@ceryx/ui";
 import type { ReactNode } from "react";
+import { ConnectionQualityIndicator } from "./ConnectionQualityIndicator.js";
 import { ViewportQualityIndicator } from "./ViewportQualityIndicator.js";
 
 export interface RemoteViewportProps {
@@ -11,6 +12,7 @@ export interface RemoteViewportProps {
   sessionStatus: string;
   codexStatus: string;
   captureState: CaptureStateResponse;
+  connectionStats?: ConnectionStatsResponse | null;
   latencyMs: number | null;
   frameRate?: number | null;
   tokenState?: "verified" | "missing" | "invalid" | "expired" | "unknown";
@@ -30,6 +32,7 @@ export function RemoteViewport({
   sessionStatus,
   codexStatus,
   captureState,
+  connectionStats = null,
   latencyMs,
   frameRate = null,
   tokenState = "unknown",
@@ -75,6 +78,10 @@ export function RemoteViewport({
             captureState={captureState}
             frameRate={frameRate}
             latencyMs={latencyMs}
+          />
+          <ConnectionQualityIndicator
+            sessionKey={`${deviceName}:${sessionStatus}`}
+            stats={connectionStats}
           />
         </div>
 

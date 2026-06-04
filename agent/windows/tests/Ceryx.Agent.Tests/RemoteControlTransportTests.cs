@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Ceryx.Agent.Codex.Clipboard;
+using Ceryx.Agent.Codex.Input;
 using Ceryx.Agent.Codex.WindowLocator;
 using Ceryx.Agent.Core;
 using Ceryx.Agent.Media;
@@ -76,6 +77,42 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
     }
 
     [Fact]
+    public async Task AgentConnectionStats_ReturnsCurrentViewportAndAgentMetrics()
+    {
+        SetWindow(FoundWindow("w-connection-stats", status: "focused", title: "Codex A"));
+
+        var client = await CreateClientAsync(Permission.ViewWindow);
+
+        var start = await client.PostAsync(
+            "/api/v1/capture/start",
+            CreateJsonContent(new CaptureStartBody("high_quality", "codex_window")));
+        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
+
+        var signal = await client.PostAsync(
+            "/api/v1/capture/webrtc/signal",
+            CreateJsonContent(new CaptureSignalBody(
+                SessionId: "session-stats",
+                Type: "offer",
+                Payload: null,
+                Sdp: "v=0\no=- 1 1 IN IP4 127.0.0.1\ns=Ceryx Offer",
+                Candidate: null)));
+        Assert.Equal(HttpStatusCode.OK, signal.StatusCode);
+
+        var response = await client.GetAsync("/api/v1/agent/connection-stats");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var root = await ReadJsonAsync(response);
+        Assert.Equal("high", root.GetProperty("viewportStats").GetProperty("currentTier").GetString());
+        Assert.Equal(1, root.GetProperty("activeViewers").GetInt32());
+        Assert.True(root.GetProperty("viewportStats").GetProperty("resolution").GetString()!.Length > 0);
+        Assert.True(root.GetProperty("agentStats").GetProperty("cpuPercent").GetDouble() >= 0);
+        Assert.True(root.GetProperty("agentStats").GetProperty("memoryMB").GetDouble() > 0);
+        Assert.True(root.GetProperty("agentStats").GetProperty("uptimeSeconds").GetDouble() > 0);
+        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("observedAt").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("connectedSince").GetString()));
+    }
+
+    [Fact]
     public async Task CodexSelectWindow_RejectsMissingWindowId()
     {
         SetWindow(FoundWindow("w-codex-select"));
@@ -136,6 +173,40 @@ public sealed class RemoteControlTransportTests : IClassFixture<RemoteControlTra
         Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
         Assert.True(secondResponse.Headers.TryGetValues("X-Trace-Id", out _));
         AssertErrorCode(await ReadJsonAsync(secondResponse), "E_INPUT_BLOCKED");
+    }
+
+    [Fact]
+    public async Task InputRoutes_SwitchWindowAndKeepInputLockedToTheSelectedWindow()
+    {
+        SetWindows([
+            FoundWindow("w-input-a", status: "focused", title: "Codex A"),
+            FoundWindow("w-input-b", status: "found", title: "Codex B")
+        ]);
+
+        var first = await AuthTestHelper.CreateAuthorizedClientContextAsync(_factory, [Permission.ControlInput]);
+        var second = await AuthTestHelper.CreateAuthorizedClientContextAsync(_factory, [Permission.ControlInput]);
+
+        var select = await first.Client.PostAsync(
+            "/api/v1/codex/select-window",
+            CreateJsonContent(new CodexSelectWindowBody("w-input-b")));
+        Assert.Equal(HttpStatusCode.OK, select.StatusCode);
+
+        var firstResponse = await first.Client.PostAsync(
+            "/api/v1/input/key",
+            CreateJsonContent(new InputKeyBody("K", "down", ["CTRL"])));
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        Assert.Equal("w-input-b", _factory.InputBridge.LastKeyWindowId);
+        Assert.Equal(first.DeviceId, _factory.InputBridge.LastKeyDeviceId);
+
+        var secondResponse = await second.Client.PostAsync(
+            "/api/v1/input/key",
+            CreateJsonContent(new InputKeyBody("K", "down", ["CTRL"])));
+
+        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+        Assert.True(secondResponse.Headers.TryGetValues("X-Trace-Id", out _));
+        AssertErrorCode(await ReadJsonAsync(secondResponse), "E_INPUT_BLOCKED");
+        Assert.Equal("w-input-b", _factory.InputBridge.LastKeyWindowId);
+        Assert.Equal(first.DeviceId, _factory.InputBridge.LastKeyDeviceId);
     }
 
     [Fact]
@@ -542,6 +613,7 @@ public sealed class RemoteControlTransportFactory : WebApplicationFactory<Progra
 {
     public TestCodexWindowLocator Locator { get; } = new();
     public FakeWindowImageCapture WindowImageCapture { get; } = new();
+    public FakeInputBridge InputBridge { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -550,15 +622,19 @@ public sealed class RemoteControlTransportFactory : WebApplicationFactory<Progra
             services.RemoveAll<ICodexWindowProbe>();
             services.RemoveAll<ICodexWindowLocator>();
             services.RemoveAll<IWindowImageCapture>();
+            services.RemoveAll<IInputBridge>();
             services.RemoveAll<IClipboardService>();
             services.RemoveAll<IPairingCodeGenerator>();
             services.AddSingleton(Locator);
             services.AddSingleton(WindowImageCapture);
+            services.AddSingleton(InputBridge);
             services.AddSingleton<IClipboardService, MemoryClipboardService>();
             services.AddSingleton<ICodexWindowLocator>(serviceProvider =>
                 serviceProvider.GetRequiredService<TestCodexWindowLocator>());
             services.AddSingleton<IWindowImageCapture>(serviceProvider =>
                 serviceProvider.GetRequiredService<FakeWindowImageCapture>());
+            services.AddSingleton<IInputBridge>(serviceProvider =>
+                serviceProvider.GetRequiredService<FakeInputBridge>());
             services.AddSingleton<IPairingCodeGenerator>(new FixedPairingCodeGenerator("654321"));
         });
     }
@@ -750,5 +826,44 @@ public sealed class FakeWindowImageCapture : IWindowImageCapture
         var contentType = format == WindowImageFormat.Png ? "image/png" : "image/jpeg";
         return Task.FromResult(Result<CapturedWindowFrame>.Success(
             new CapturedWindowFrame(bytes, contentType, 1280, 720, DateTimeOffset.UtcNow)));
+    }
+}
+
+public sealed class FakeInputBridge : IInputBridge
+{
+    public string? LastKeyWindowId { get; private set; }
+
+    public string? LastKeyDeviceId { get; private set; }
+
+    public string? LastMouseWindowId { get; private set; }
+
+    public string? LastMouseDeviceId { get; private set; }
+
+    public Task<InputExecutionResult> ExecuteKeyAsync(
+        InputExecutionContext context,
+        InputKeyBody body,
+        CancellationToken cancellationToken = default)
+    {
+        LastKeyWindowId = context.WindowId;
+        LastKeyDeviceId = context.DeviceId;
+        return Task.FromResult(new InputExecutionResult(
+            IsAccepted: true,
+            Action: "input.key",
+            Status: "applied",
+            Message: $"input.key accepted for window {context.WindowId}"));
+    }
+
+    public Task<InputExecutionResult> ExecuteMouseAsync(
+        InputExecutionContext context,
+        InputMouseBody body,
+        CancellationToken cancellationToken = default)
+    {
+        LastMouseWindowId = context.WindowId;
+        LastMouseDeviceId = context.DeviceId;
+        return Task.FromResult(new InputExecutionResult(
+            IsAccepted: true,
+            Action: "input.mouse",
+            Status: "applied",
+            Message: $"input.mouse accepted for window {context.WindowId}"));
     }
 }

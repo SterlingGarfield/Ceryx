@@ -5,6 +5,7 @@ import {
   type CaptureFrameResult,
   type CaptureMode,
   type CaptureStateResponse,
+  type ConnectionStatsResponse,
   type CodexWindowSnapshot,
   type PreviewRefreshProfile
 } from "@ceryx/client-sdk";
@@ -72,6 +73,7 @@ import {
   getCaptureState,
   getCodexWindow,
   listCodexWindows,
+  requestConnectionStats,
   downloadAgentFile,
   markNotificationRead,
   probeAgent,
@@ -238,6 +240,7 @@ export function ConsoleRoute() {
   const [codexWindowsError, setCodexWindowsError] = useState("");
   const [windowPreviewUrls, setWindowPreviewUrls] = useState<Record<string, string>>({});
   const [pipDismissedWindowIds, setPipDismissedWindowIds] = useState<string[]>([]);
+  const [connectionStats, setConnectionStats] = useState<ConnectionStatsResponse | null>(null);
   const [filesWorkspaceOpen, setFilesWorkspaceOpen] = useState(false);
   const [filesQuery, setFilesQuery] = useState("");
   const [projectFiles, setProjectFiles] = useState<ProjectFileEntry[]>([]);
@@ -354,8 +357,16 @@ export function ConsoleRoute() {
 
   function resolveActiveWindowId(windowList: CodexWindowSnapshot[] = codexWindows): string | null {
     const windows = Array.isArray(windowList) ? windowList : [];
+    const capturedWindowId = remoteSession.captureState.windowId?.trim();
+    if (capturedWindowId) {
+      const capturedWindow = windows.find((window) => window.windowId?.trim() === capturedWindowId);
+      if (capturedWindow?.windowId?.trim()) {
+        return capturedWindow.windowId.trim();
+      }
+    }
+
     const focusedWindow = windows.find((window) => window.status === "focused");
-    const windowId = remoteSession.captureState.windowId?.trim() || focusedWindow?.windowId?.trim() || windows[0]?.windowId?.trim();
+    const windowId = focusedWindow?.windowId?.trim() || windows[0]?.windowId?.trim();
     return windowId && windowId.length > 0 ? windowId : null;
   }
 
@@ -407,15 +418,18 @@ export function ConsoleRoute() {
       setCodexWindows([]);
       setWindowPreviewUrls({});
       setPipDismissedWindowIds([]);
+      setConnectionStats(null);
       setCodexWindowsLoading(false);
       return;
     }
 
     try {
-      const [windowSnapshot, captureState, windowList] = await Promise.all([
+      const connectionStatsPromise = requestConnectionStats(activeBaseUrl).catch(() => null);
+      const [windowSnapshot, captureState, windowList, connectionStats] = await Promise.all([
         getCodexWindow(activeBaseUrl),
         getCaptureState(activeBaseUrl),
-        listCodexWindows(activeBaseUrl)
+        listCodexWindows(activeBaseUrl),
+        connectionStatsPromise
       ]);
       setCodexTitle(windowSnapshot.title ?? "Codex");
       setCodexStatus(windowSnapshot.status);
@@ -423,6 +437,7 @@ export function ConsoleRoute() {
       remoteSession.setPermissions(permissions);
       remoteSession.markActive();
       setCodexWindows(windowList.windows);
+      setConnectionStats(connectionStats);
       setPipDismissedWindowIds((current) =>
         current.filter((windowId) => windowList.windows.some((window) => window.windowId === windowId))
       );
@@ -445,6 +460,7 @@ export function ConsoleRoute() {
       setCodexWindows([]);
       setWindowPreviewUrls({});
       setPipDismissedWindowIds([]);
+      setConnectionStats(null);
       setCodexWindowsError(message);
       setViewportMessage(message);
     } finally {
@@ -1787,6 +1803,7 @@ export function ConsoleRoute() {
           sessionStatus={remoteSession.status}
           codexStatus={codexStatus}
           captureState={remoteSession.captureState}
+          connectionStats={connectionStats}
           latencyMs={remoteSession.latencyMs}
           frameRate={remoteSession.captureState.frameRate ?? null}
           tokenState={toViewportTokenState(tokenState)}
