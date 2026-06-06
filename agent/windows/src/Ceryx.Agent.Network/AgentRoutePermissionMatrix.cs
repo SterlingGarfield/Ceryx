@@ -62,6 +62,8 @@ public static class AgentRoutePermissionMatrix
         new("POST", "/api/v1/agent/pause-control", false, Permission.ManageAgent, LocalOnly: true),
         new("POST", "/api/v1/agent/resume-control", false, Permission.ManageAgent, LocalOnly: true),
         new("POST", "/api/v1/agent/open-logs-folder", false, Permission.ManageAgent, LocalOnly: true),
+        new("POST", "/api/v1/agent/export-diagnostics", false, Permission.ManageAgent),
+        new("POST", "/api/v1/agent/self-test", false, Permission.ManageAgent),
         new("POST", "/api/v1/agent/restart-request", false, Permission.ManageAgent, LocalOnly: true),
         new("GET", "/api/v1/logs", false, null),
         new("GET", "/api/v1/settings", false, null),

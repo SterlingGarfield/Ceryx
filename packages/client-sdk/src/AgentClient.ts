@@ -1,5 +1,7 @@
 import type {
   AgentCertificateFingerprintResponse,
+  AgentDiagnosticsExportResponse,
+  AgentDiagnosticsSelfTestResponse,
   AgentManagementResponse,
   ClipboardClearResponse,
   ClipboardReceiveResponse,
@@ -769,6 +771,20 @@ export class AgentClient {
 
   async restartRequest(): Promise<AgentManagementResponse> {
     return this.request<AgentManagementResponse>("/api/v1/agent/restart-request", {
+      auth: true,
+      method: "POST"
+    });
+  }
+
+  async exportDiagnostics(): Promise<AgentDiagnosticsExportResponse> {
+    return this.request<AgentDiagnosticsExportResponse>("/api/v1/agent/export-diagnostics", {
+      auth: true,
+      method: "POST"
+    });
+  }
+
+  async runSelfTest(): Promise<AgentDiagnosticsSelfTestResponse> {
+    return this.request<AgentDiagnosticsSelfTestResponse>("/api/v1/agent/self-test", {
       auth: true,
       method: "POST"
     });

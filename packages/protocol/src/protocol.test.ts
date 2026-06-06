@@ -40,6 +40,7 @@ describe("v0.3 protocol constants", () => {
   it("keeps public routes limited to health and pairing endpoints", () => {
     expect(PublicApiRoutes).toEqual([
       "GET /api/v1/health",
+      "GET /api/v1/agent/cert-fingerprint",
       "POST /api/v1/pairing/request",
       "POST /api/v1/pairing/desktop-confirm"
     ]);
@@ -48,6 +49,8 @@ describe("v0.3 protocol constants", () => {
     expect(ProtectedApiRoutes).toContain("GET /api/v1/clipboard/receive");
     expect(ProtectedApiRoutes).toContain("POST /api/v1/clipboard/clear");
     expect(ProtectedApiRoutes).toContain("GET /api/v1/codex/windows");
+    expect(ProtectedApiRoutes).toContain("POST /api/v1/agent/export-diagnostics");
+    expect(ProtectedApiRoutes).toContain("POST /api/v1/agent/self-test");
   });
 
   it("defines runtime statuses and event names for connection flow", () => {

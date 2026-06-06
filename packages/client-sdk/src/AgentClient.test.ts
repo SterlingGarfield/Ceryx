@@ -666,6 +666,57 @@ describe("AgentClient", () => {
     expect(calls[0]?.init?.method).toBe("POST");
   });
 
+  it("posts diagnostics export to the dedicated export endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          archivePath: "D:/tmp/diagnostics.zip",
+          archiveSizeBytes: 2048,
+          pairedDeviceCount: 2,
+          startupCount: 4,
+          generatedAt: "2026-06-05T01:00:00.000Z"
+        });
+      }
+    });
+
+    const response = await client.exportDiagnostics();
+
+    expect(response.ok).toBe(true);
+    expect(response.archivePath).toBe("D:/tmp/diagnostics.zip");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/agent/export-diagnostics");
+    expect(calls[0]?.init?.method).toBe("POST");
+  });
+
+  it("posts diagnostics self-test to the dedicated self-test endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new AgentClient({
+      baseUrl: "http://127.0.0.1:41527",
+      getToken: () => "token_123",
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return Response.json({
+          ok: true,
+          passed: 4,
+          failed: 0,
+          generatedAt: "2026-06-05T01:00:00.000Z",
+          checks: [{ name: "network.bind", passed: true, message: "ok" }]
+        });
+      }
+    });
+
+    const response = await client.runSelfTest();
+
+    expect(response.ok).toBe(true);
+    expect(response.passed).toBe(4);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:41527/api/v1/agent/self-test");
+    expect(calls[0]?.init?.method).toBe("POST");
+  });
+
   it("posts high-risk confirmation when starting recording", async () => {
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     const client = new AgentClient({

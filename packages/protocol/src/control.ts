@@ -288,6 +288,29 @@ export interface AgentManagementResponse {
   message: string;
 }
 
+export interface AgentDiagnosticsExportResponse {
+  ok: boolean;
+  archivePath: string;
+  archiveSizeBytes: number;
+  pairedDeviceCount: number;
+  startupCount: number;
+  generatedAt: string;
+}
+
+export interface AgentDiagnosticsCheckResult {
+  name: string;
+  passed: boolean;
+  message: string;
+}
+
+export interface AgentDiagnosticsSelfTestResponse {
+  ok: boolean;
+  passed: number;
+  failed: number;
+  generatedAt: string;
+  checks: AgentDiagnosticsCheckResult[];
+}
+
 export const LogSeverityValues = ["info", "warning", "error"] as const;
 export type LogSeverity = (typeof LogSeverityValues)[number];
 

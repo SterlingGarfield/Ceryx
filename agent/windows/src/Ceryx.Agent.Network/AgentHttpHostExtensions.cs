@@ -7,6 +7,7 @@ using Ceryx.Agent.Codex.SessionLock;
 using Ceryx.Agent.Codex.WindowLocator;
 using Ceryx.Agent.Media;
 using Ceryx.Agent.Project;
+using Ceryx.Agent.Network.Diagnostics;
 using Ceryx.Agent.Security.Devices;
 using Ceryx.Agent.Security.Pairing;
 using Ceryx.Agent.Storage;
@@ -324,6 +325,14 @@ public static class AgentHttpHostExtensions
                 OpenLogsFolderHandler(context, trayShell, loggerFactory))
             .RequireAgentAuth(Permission.ManageAgent)
             .RequireLocalAgent();
+        app.MapPost(
+            "/api/v1/agent/export-diagnostics",
+            (AgentDiagnosticsService diagnosticsService) => ExportDiagnosticsHandler(diagnosticsService))
+            .RequireAgentAuth(Permission.ManageAgent);
+        app.MapPost(
+            "/api/v1/agent/self-test",
+            (AgentDiagnosticsService diagnosticsService) => SelfTestHandler(diagnosticsService))
+            .RequireAgentAuth(Permission.ManageAgent);
         app.MapPost(
             "/api/v1/agent/restart-request",
             (HttpContext context, ILoggerFactory loggerFactory) =>
@@ -1827,6 +1836,20 @@ public static class AgentHttpHostExtensions
             Status: "applied",
             Executed: true,
             Message: "Open logs folder request forwarded to local shell."));
+    }
+
+    private static async Task<IResult> ExportDiagnosticsHandler(
+        AgentDiagnosticsService diagnosticsService)
+    {
+        var result = await diagnosticsService.ExportAsync();
+        return TypedResults.Ok(result);
+    }
+
+    private static async Task<IResult> SelfTestHandler(
+        AgentDiagnosticsService diagnosticsService)
+    {
+        var result = await diagnosticsService.RunSelfTestAsync();
+        return TypedResults.Ok(result);
     }
 
     private static IResult RestartRequestHandler(

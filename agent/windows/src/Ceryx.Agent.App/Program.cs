@@ -8,6 +8,7 @@ using Ceryx.Agent.Codex.WindowLocator;
 using Ceryx.Agent.Core;
 using Ceryx.Agent.Media;
 using Ceryx.Agent.Network;
+using Ceryx.Agent.Network.Diagnostics;
 using Ceryx.Agent.Network.Discovery;
 using Ceryx.Agent.Project;
 using Ceryx.Agent.Security.Devices;
@@ -114,6 +115,8 @@ try
     builder.Services.AddSingleton<IWindowCaptureBackendInfo>(serviceProvider =>
         serviceProvider.GetRequiredService<WindowImageCapture>());
     builder.Services.AddSingleton<IWebRtcFrameSource, WindowWebRtcFrameSource>();
+    builder.Services.AddSingleton<CrashCollector>();
+    builder.Services.AddSingleton<AgentDiagnosticsService>();
     builder.Services.AddSingleton<IFramePreviewService, FramePreviewService>();
     builder.Services.AddSingleton<IAudioCaptureService, WasapiLoopbackAudioCaptureService>();
     builder.Services.AddSingleton<IRecordingMediaEncoder, FfmpegRecordingMediaEncoder>();
@@ -153,9 +156,41 @@ try
     app.Logger.LogInformation("Storage initialization completed.");
 
     var trayShell = app.Services.GetRequiredService<IAgentTrayShell>();
+    var crashCollector = app.Services.GetRequiredService<CrashCollector>();
     app.Logger.LogInformation(
         "Tray shell initialized with commands: {CommandIds}",
         string.Join(", ", trayShell.Commands.Select(static command => command.Id)));
+
+    AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+    {
+        if (eventArgs.ExceptionObject is Exception exception)
+        {
+            try
+            {
+                crashCollector.Record(exception);
+            }
+            catch
+            {
+                // Best-effort crash collection must never throw from the process hook.
+            }
+        }
+    };
+
+    TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+    {
+        try
+        {
+            crashCollector.Record(eventArgs.Exception);
+        }
+        catch
+        {
+            // Best-effort crash collection must never throw from the task hook.
+        }
+        finally
+        {
+            eventArgs.SetObserved();
+        }
+    };
 
     app.UseAgentRequestTracing();
     app.UseCors("CeryxLocalClients");
