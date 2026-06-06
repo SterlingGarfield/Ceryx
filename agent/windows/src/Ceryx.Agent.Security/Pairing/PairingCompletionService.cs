@@ -8,6 +8,7 @@ public sealed record PairingCompletionSuccess(
     string DeviceId,
     string DeviceToken,
     IReadOnlyList<Permission> Permissions,
+    string CertFingerprint,
     WakeOnLanInfo? Wol
 );
 
@@ -28,6 +29,7 @@ public sealed class PairingCompletionService
     private readonly IDeviceTokenHasher _tokenHasher;
     private readonly IDefaultPermissionPolicy _permissionPolicy;
     private readonly IWakeOnLanInfoProvider _wakeOnLanInfoProvider;
+    private readonly IAgentCertificateFingerprintProvider _certificateFingerprintProvider;
 
     public PairingCompletionService(
         PairingStateMachine stateMachine,
@@ -35,7 +37,8 @@ public sealed class PairingCompletionService
         IDeviceTokenGenerator tokenGenerator,
         IDeviceTokenHasher tokenHasher,
         IDefaultPermissionPolicy permissionPolicy,
-        IWakeOnLanInfoProvider wakeOnLanInfoProvider)
+        IWakeOnLanInfoProvider wakeOnLanInfoProvider,
+        IAgentCertificateFingerprintProvider certificateFingerprintProvider)
     {
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _trustedDeviceStore = trustedDeviceStore ?? throw new ArgumentNullException(nameof(trustedDeviceStore));
@@ -43,6 +46,7 @@ public sealed class PairingCompletionService
         _tokenHasher = tokenHasher ?? throw new ArgumentNullException(nameof(tokenHasher));
         _permissionPolicy = permissionPolicy ?? throw new ArgumentNullException(nameof(permissionPolicy));
         _wakeOnLanInfoProvider = wakeOnLanInfoProvider ?? throw new ArgumentNullException(nameof(wakeOnLanInfoProvider));
+        _certificateFingerprintProvider = certificateFingerprintProvider ?? throw new ArgumentNullException(nameof(certificateFingerprintProvider));
     }
 
     public async Task<PairingCompletionResult> ConfirmAsync(
@@ -72,6 +76,7 @@ public sealed class PairingCompletionService
         var tokenHash = _tokenHasher.Hash(deviceToken);
         var deviceId = "dev_" + Guid.NewGuid().ToString("N");
         var wol = _wakeOnLanInfoProvider.GetWakeOnLanInfo();
+        var certFingerprint = _certificateFingerprintProvider.GetCurrentFingerprint();
 
         var trustedDevice = new TrustedDeviceRecord(
             DeviceId: deviceId,
@@ -80,6 +85,7 @@ public sealed class PairingCompletionService
             ClientType: clientType,
             TokenHash: tokenHash,
             Permissions: permissions,
+            CertFingerprint: certFingerprint,
             Wol: wol,
             CreatedAt: DateTimeOffset.UtcNow);
 
@@ -94,6 +100,7 @@ public sealed class PairingCompletionService
                 DeviceId: deviceId,
                 DeviceToken: deviceToken,
                 Permissions: permissions,
+                CertFingerprint: certFingerprint,
                 Wol: wol));
     }
 }

@@ -1,4 +1,5 @@
 import type {
+  AgentCertificateFingerprintResponse,
   AgentManagementResponse,
   ClipboardClearResponse,
   ClipboardReceiveResponse,
@@ -63,6 +64,8 @@ export interface AgentClientOptions {
   setToken?: (token: string) => void;
   clearToken?: () => void;
   onTokenInvalid?: (error: CeryxApiError) => void;
+  expectedCertFingerprint?: string;
+  allowHttpFallback?: boolean;
   fetchImpl?: typeof fetch;
   waitImpl?: (delayMs: number) => Promise<void>;
 }
@@ -139,6 +142,7 @@ export function isTokenInvalidError(error: unknown): error is CeryxApiError {
 export class AgentClient {
   private readonly fetchImpl: typeof fetch;
   private readonly waitImpl: (delayMs: number) => Promise<void>;
+  private verifiedFingerprint: string | undefined;
 
   constructor(private readonly options: AgentClientOptions) {
     this.fetchImpl = options.fetchImpl ?? resolveDefaultFetchImpl();
@@ -147,6 +151,29 @@ export class AgentClient {
 
   async health(): Promise<{ ok: true }> {
     return this.request<{ ok: true }>("/api/v1/health", { auth: false });
+  }
+
+  async getCertificateFingerprint(): Promise<string> {
+    const response = await this.fetchWithTransportFallback("/api/v1/agent/cert-fingerprint", {
+      headers: {
+        Accept: "application/json"
+      },
+      method: "GET"
+    });
+    const payload = await readJsonPayload(response);
+    if (!response.ok) {
+      throw this.toApiError(response.status, payload);
+    }
+
+    if (!payload || typeof payload !== "object" || typeof (payload as AgentCertificateFingerprintResponse).fingerprint !== "string") {
+      throw new CeryxApiError(
+        "E_HTTP_EMPTY_BODY",
+        response.status,
+        "Certificate fingerprint response was empty or invalid."
+      );
+    }
+
+    return normalizeFingerprint((payload as AgentCertificateFingerprintResponse).fingerprint);
   }
 
   async requestPairing(
@@ -497,8 +524,10 @@ export class AgentClient {
     }
     headers.Authorization = `Bearer ${token}`;
 
-    const response = await this.fetchImpl(
-      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/capture/frame${
+    await this.ensureExpectedCertificateFingerprint();
+
+    const response = await this.fetchWithTransportFallback(
+      `/api/v1/capture/frame${
         query ? `?windowId=${encodeURIComponent(query)}` : ""
       }`,
       {
@@ -585,8 +614,10 @@ export class AgentClient {
 
     headers.Authorization = `Bearer ${token}`;
 
-    const response = await this.fetchImpl(
-      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/files/download/${encodeURIComponent(fileId)}`,
+    await this.ensureExpectedCertificateFingerprint();
+
+    const response = await this.fetchWithTransportFallback(
+      `/api/v1/files/download/${encodeURIComponent(fileId)}`,
       {
         headers,
         method: "GET",
@@ -692,8 +723,10 @@ export class AgentClient {
       throw new Error(`Missing device token for authenticated request: /api/v1/media/recordings/download/${fileName}`);
     }
 
-    const response = await this.fetchImpl(
-      `${stripTrailingSlash(this.options.baseUrl)}/api/v1/media/recordings/download/${encodeURIComponent(fileName)}`,
+    await this.ensureExpectedCertificateFingerprint();
+
+    const response = await this.fetchWithTransportFallback(
+      `/api/v1/media/recordings/download/${encodeURIComponent(fileName)}`,
       {
         method: "GET",
         headers: {
@@ -842,7 +875,11 @@ export class AgentClient {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await this.fetchImpl(`${stripTrailingSlash(this.options.baseUrl)}${path}`, {
+    if (config.auth) {
+      await this.ensureExpectedCertificateFingerprint();
+    }
+
+    const response = await this.fetchWithTransportFallback(path, {
       body: requestBody,
       headers,
       method: config.method ?? "GET"
@@ -901,6 +938,49 @@ export class AgentClient {
       `HTTP request failed with status ${status}.`
     );
   }
+
+  private async ensureExpectedCertificateFingerprint(): Promise<void> {
+    const expectedFingerprint = normalizeFingerprint(this.options.expectedCertFingerprint);
+    if (!expectedFingerprint) {
+      return;
+    }
+
+    if (this.verifiedFingerprint === expectedFingerprint) {
+      return;
+    }
+
+    const observedFingerprint = await this.getCertificateFingerprint();
+    if (observedFingerprint !== expectedFingerprint) {
+      throw new CeryxApiError(
+        "E_CERT_FINGERPRINT_MISMATCH",
+        495,
+        "Agent certificate fingerprint did not match the pinned value."
+      );
+    }
+
+    this.verifiedFingerprint = observedFingerprint;
+  }
+
+  private async fetchWithTransportFallback(path: string, init: RequestInit): Promise<Response> {
+    const primaryBaseUrl = stripTrailingSlash(this.options.baseUrl);
+    const fallbackBaseUrl = resolveHttpFallbackBaseUrl(primaryBaseUrl, this.options.allowHttpFallback === true);
+    let primaryError: unknown;
+
+    try {
+      return await this.fetchImpl(`${primaryBaseUrl}${path}`, init);
+    } catch (error) {
+      primaryError = error;
+      if (!fallbackBaseUrl) {
+        throw error;
+      }
+    }
+
+    try {
+      return await this.fetchImpl(`${fallbackBaseUrl}${path}`, init);
+    } catch {
+      throw primaryError;
+    }
+  }
 }
 
 export function normalizePreviewRefreshProfile(
@@ -918,6 +998,10 @@ function parseHeaderNumber(value: string | null): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+function normalizeFingerprint(value: string | undefined | null): string {
+  return value?.trim().toUpperCase() ?? "";
+}
+
 function resolveDefaultFetchImpl(): typeof fetch {
   const fetchImpl = globalThis.fetch;
   if (typeof fetchImpl !== "function") {
@@ -925,6 +1009,40 @@ function resolveDefaultFetchImpl(): typeof fetch {
   }
 
   return fetchImpl.bind(globalThis);
+}
+
+function resolveHttpFallbackBaseUrl(baseUrl: string, allowHttpFallback: boolean): string | undefined {
+  if (!allowHttpFallback) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    return undefined;
+  }
+
+  if (parsed.protocol !== "https:") {
+    return undefined;
+  }
+
+  if (!isLoopbackHost(parsed.hostname)) {
+    return undefined;
+  }
+
+  if ((parsed.port || "443") !== "41527") {
+    return undefined;
+  }
+
+  parsed.protocol = "http:";
+  parsed.port = "41528";
+  return stripTrailingSlash(parsed.toString());
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
 }
 
 function isBodyInitPayload(value: unknown): value is BodyInit {

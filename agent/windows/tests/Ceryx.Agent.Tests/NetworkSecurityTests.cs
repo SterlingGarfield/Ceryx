@@ -133,6 +133,65 @@ public sealed class NetworkSecurityTests : IClassFixture<WebApplicationFactory<P
         Assert.Equal("E_PAIRING_RATE_LIMITED", document.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
+    [Fact]
+    public async Task NetworkSecurity_CertificateFingerprintEndpointReturnsSha256Fingerprint()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/v1/agent/cert-fingerprint");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var fingerprint = document.RootElement.GetProperty("fingerprint").GetString();
+        Assert.NotNull(fingerprint);
+        Assert.Matches("^[A-F0-9]{64}$", fingerprint!);
+    }
+
+    [Fact]
+    public async Task NetworkSecurity_RegenerateCertificateEndpointRotatesFingerprint()
+    {
+        var client = await AuthTestHelper.CreateAuthorizedClientAsync(
+            _factory,
+            permissions: [Ceryx.Agent.Core.Permission.ManageAgent]);
+
+        var beforeResponse = await client.GetAsync("/api/v1/agent/cert-fingerprint");
+        Assert.Equal(HttpStatusCode.OK, beforeResponse.StatusCode);
+        using var beforeDocument = JsonDocument.Parse(await beforeResponse.Content.ReadAsStringAsync());
+        var beforeFingerprint = beforeDocument.RootElement.GetProperty("fingerprint").GetString();
+
+        var regenerateResponse = await client.PostAsync(
+            "/api/v1/agent/regenerate-cert",
+            CreateJsonContent(new { }));
+
+        Assert.Equal(HttpStatusCode.OK, regenerateResponse.StatusCode);
+
+        var afterResponse = await client.GetAsync("/api/v1/agent/cert-fingerprint");
+        Assert.Equal(HttpStatusCode.OK, afterResponse.StatusCode);
+        using var afterDocument = JsonDocument.Parse(await afterResponse.Content.ReadAsStringAsync());
+        var afterFingerprint = afterDocument.RootElement.GetProperty("fingerprint").GetString();
+
+        Assert.NotEqual(beforeFingerprint, afterFingerprint);
+    }
+
+    [Fact]
+    public async Task NetworkSecurity_PairingRequestReturnsCertificateFingerprint()
+    {
+        var client = _factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/pairing/request");
+        request.Content = new StringContent(
+            "{\"clientName\":\"ipad-test\",\"clientType\":\"ipad\",\"platform\":\"ios\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var fingerprint = document.RootElement.GetProperty("certFingerprint").GetString();
+        Assert.NotNull(fingerprint);
+        Assert.Matches("^[A-F0-9]{64}$", fingerprint!);
+    }
+
     private sealed class InMemoryPairingRateLimiterForTests : IPairingRateLimiter
     {
         private readonly int _limit;

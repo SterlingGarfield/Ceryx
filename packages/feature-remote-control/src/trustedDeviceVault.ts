@@ -6,13 +6,44 @@ function keyFor(baseUrl: string): string {
   return `${keyPrefix}${encodeURIComponent(baseUrl.trim().toLowerCase())}`;
 }
 
+function resolveAlternateBaseUrl(baseUrl: string): string | undefined {
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.port !== "41527") {
+      return undefined;
+    }
+
+    if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost" && parsed.hostname !== "::1") {
+      return undefined;
+    }
+
+    if (parsed.protocol === "https:") {
+      parsed.protocol = "http:";
+    } else if (parsed.protocol === "http:") {
+      parsed.protocol = "https:";
+    } else {
+      return undefined;
+    }
+
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
 export function readTrustedDevicesCache(baseUrl: string): TrustedDevice[] {
   if (!baseUrl.trim()) {
     return [];
   }
 
   try {
-    const raw = globalThis.localStorage?.getItem(keyFor(baseUrl));
+    const raw = globalThis.localStorage?.getItem(keyFor(baseUrl))
+      ?? (() => {
+        const alternateBaseUrl = resolveAlternateBaseUrl(baseUrl);
+        return alternateBaseUrl
+          ? globalThis.localStorage?.getItem(keyFor(alternateBaseUrl))
+          : null;
+      })();
     if (!raw) {
       return [];
     }

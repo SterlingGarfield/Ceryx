@@ -48,7 +48,8 @@ public sealed record PairingRequestResponse(
     [property: JsonPropertyName("state")] string State,
     [property: JsonPropertyName("pairingId")] string? PairingId,
     [property: JsonPropertyName("expiresAt")] string? ExpiresAt,
-    [property: JsonPropertyName("rejectedReason")] string? RejectedReason
+    [property: JsonPropertyName("rejectedReason")] string? RejectedReason,
+    [property: JsonPropertyName("certFingerprint")] string? CertFingerprint = null
 );
 
 public sealed record PairingDesktopConfirmBody(
@@ -71,7 +72,12 @@ public sealed record PairingConfirmResponse(
     [property: JsonPropertyName("deviceId")] string DeviceId,
     [property: JsonPropertyName("deviceToken")] string DeviceToken,
     [property: JsonPropertyName("permissions")] IReadOnlyList<string> Permissions,
-    [property: JsonPropertyName("wol")] WakeOnLanInfo? Wol
+    [property: JsonPropertyName("wol")] WakeOnLanInfo? Wol,
+    [property: JsonPropertyName("certFingerprint")] string CertFingerprint
+);
+
+public sealed record AgentCertificateFingerprintResponse(
+    [property: JsonPropertyName("fingerprint")] string Fingerprint
 );
 
 public sealed record PairingConfirmRejectedResponse(

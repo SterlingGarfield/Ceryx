@@ -54,6 +54,7 @@ public sealed class TrustedDevicesStoreTests
                 ClientType: "ipad",
                 TokenHash: tokenHash,
                 Permissions: [Permission.ViewWindow, Permission.SendPrompt],
+                CertFingerprint: "ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
                 Wol: new WakeOnLanInfo(
                     Supported: true,
                     MacAddresses: ["AA:BB:CC:DD:EE:FF"],
@@ -66,6 +67,7 @@ public sealed class TrustedDevicesStoreTests
             var found = await store.FindByTokenHashAsync(tokenHash);
             Assert.NotNull(found);
             Assert.Equal(device.DeviceId, found!.DeviceId);
+            Assert.Equal(device.CertFingerprint, found.CertFingerprint);
             Assert.NotNull(found.Wol);
             Assert.Equal("192.168.1.255", found.Wol!.BroadcastAddress);
             Assert.Contains("AA:BB:CC:DD:EE:FF", found.Wol.MacAddresses);
@@ -157,7 +159,8 @@ public sealed class PairingTrustedDevicesFlowTests
                 new DeviceTokenGenerator(),
                 tokenHasher,
                 new DefaultPermissionPolicy(),
-                new FixedWakeOnLanInfoProvider());
+                new FixedWakeOnLanInfoProvider(),
+                new FixedCertificateFingerprintProvider());
 
             var request = await stateMachine.RequestAsync(new PairingRequestContext("My iPad", "ipad", "ios"));
             Assert.True(request.IsAccepted);
@@ -173,6 +176,7 @@ public sealed class PairingTrustedDevicesFlowTests
             Assert.StartsWith("dev_", success.DeviceId, StringComparison.Ordinal);
             Assert.StartsWith("dt_", success.DeviceToken, StringComparison.Ordinal);
             Assert.Contains(Permission.ViewWindow, success.Permissions);
+            Assert.Matches("^[A-F0-9]{64}$", success.CertFingerprint);
             Assert.NotNull(success.Wol);
             Assert.Equal("192.168.1.255", success.Wol!.BroadcastAddress);
 
@@ -180,6 +184,7 @@ public sealed class PairingTrustedDevicesFlowTests
             Assert.NotNull(stored);
             Assert.Equal(success.DeviceId, stored!.DeviceId);
             Assert.NotEqual(success.DeviceToken, stored.TokenHash);
+            Assert.Equal(success.CertFingerprint, stored.CertFingerprint);
             Assert.NotNull(stored.Wol);
             Assert.Equal(success.Wol.BroadcastAddress, stored.Wol!.BroadcastAddress);
         }
@@ -216,6 +221,14 @@ public sealed class PairingTrustedDevicesFlowTests
                 MacAddresses: ["AA:BB:CC:DD:EE:FF"],
                 BroadcastAddress: "192.168.1.255",
                 Port: 9);
+        }
+    }
+
+    private sealed class FixedCertificateFingerprintProvider : IAgentCertificateFingerprintProvider
+    {
+        public string GetCurrentFingerprint()
+        {
+            return "ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890";
         }
     }
 }

@@ -14,6 +14,7 @@ public static class AgentRoutePermissionMatrix
     public static IReadOnlyList<AgentRoutePermissionEntry> Entries { get; } =
     [
         new("GET", "/api/v1/health", true, null),
+        new("GET", "/api/v1/agent/cert-fingerprint", true, null),
         new("POST", "/api/v1/pairing/request", true, null),
         new("POST", "/api/v1/pairing/desktop-confirm", true, null, LocalOnly: true),
         new("POST", "/api/v1/pairing/confirm", true, null),
@@ -21,6 +22,7 @@ public static class AgentRoutePermissionMatrix
         new("DELETE", "/api/v1/devices/{deviceId}", false, Permission.ManageDevices),
         new("GET", "/api/v1/agent/status", false, null),
         new("GET", "/api/v1/agent/paths", false, null),
+        new("POST", "/api/v1/agent/regenerate-cert", false, Permission.ManageAgent, LocalOnly: true),
         new("GET", "/api/v1/agent/connection-stats", false, Permission.ViewWindow),
         new("GET", "/api/v1/codex/window", false, Permission.ViewWindow),
         new("GET", "/api/v1/codex/windows", false, Permission.ViewWindow),

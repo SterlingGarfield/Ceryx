@@ -23,7 +23,8 @@ using Serilog;
 using Serilog.Events;
 using System.Net;
 
-const int AgentHttpPort = 41527;
+const int AgentHttpsPort = 41527;
+const int AgentHttpFallbackPort = 41528;
 
 var agentRootOverride = Environment.GetEnvironmentVariable("CERYX_AGENT_ROOT_OVERRIDE");
 var localPaths = !string.IsNullOrWhiteSpace(agentRootOverride)
@@ -44,11 +45,30 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
+    var tlsSettings = new AgentTlsSettings(
+        HttpsPort: AgentHttpsPort,
+        HttpFallbackPort: AgentHttpFallbackPort,
+        ValidityDays: 365);
+    var tlsManager = new AgentTlsCertificateManager(
+        localPaths,
+        tlsSettings,
+        AgentNetworkBindingResolver.ResolveSubjectAlternativeNames());
+
     var builder = WebApplication.CreateBuilder(args);
-    var bindingUrls = AgentNetworkBindingResolver.ResolveUrls(AgentHttpPort);
+    var bindingUrls = AgentNetworkBindingResolver.ResolveUrls(AgentHttpsPort, AgentHttpFallbackPort);
     builder.Host.UseSerilog();
     builder.WebHost.UseUrls(bindingUrls.ToArray());
+    builder.WebHost.ConfigureKestrel(options =>
+    {
+        options.ConfigureHttpsDefaults(httpsOptions =>
+        {
+            httpsOptions.ServerCertificateSelector = (_, _) => tlsManager.GetCurrentCertificate().Certificate;
+        });
+    });
     builder.Services.AddSingleton(localPaths);
+    builder.Services.AddSingleton(tlsSettings);
+    builder.Services.AddSingleton(tlsManager);
+    builder.Services.AddSingleton<IAgentCertificateFingerprintProvider>(tlsManager);
     builder.Services.AddSingleton<AgentRuntimeState>();
     builder.Services.AddSingleton<IPairingRateLimiter, InMemoryPairingRateLimiter>();
     builder.Services.AddSingleton<AgentDiscoveryMetadataFactory>();

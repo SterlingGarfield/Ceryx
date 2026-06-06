@@ -13,6 +13,7 @@ export interface PairingRequestResponse {
   pairingId: string;
   expiresAt: string;
   state: PairingState;
+  certFingerprint?: string;
 }
 
 export interface PairingConfirmRequest {
@@ -35,6 +36,7 @@ export interface PairingConfirmResponse {
   deviceId: string;
   deviceToken: string;
   permissions: CeryxPermission[];
+  certFingerprint: string;
   wol?: WakeOnLanInfo;
 }
 

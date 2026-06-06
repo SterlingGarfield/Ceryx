@@ -15,6 +15,7 @@ export * from "./useViewportPreview.js";
 export * from "./useWebRtcViewport.js";
 export * from "./defaultPermissions.js";
 export * from "./protocolError.js";
+export * from "./agentCertificateVault.js";
 export * from "./stores/useConnectionStore.js";
 export * from "./stores/usePairingStore.js";
 export * from "./stores/usePromptStore.js";

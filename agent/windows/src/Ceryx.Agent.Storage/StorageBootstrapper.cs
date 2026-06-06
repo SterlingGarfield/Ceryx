@@ -60,6 +60,7 @@ public sealed class StorageBootstrapper
               client_type TEXT NOT NULL,
               token_hash TEXT NOT NULL,
               permissions_json TEXT NOT NULL,
+              cert_fingerprint TEXT NOT NULL DEFAULT '',
               wol_json TEXT NOT NULL DEFAULT '',
               created_at TEXT NOT NULL
             );
@@ -146,6 +147,12 @@ public sealed class StorageBootstrapper
             existingColumns,
             "permissions_json",
             "TEXT NOT NULL DEFAULT '[]'",
+            cancellationToken);
+        await AddColumnIfMissingAsync(
+            connection,
+            existingColumns,
+            "cert_fingerprint",
+            "TEXT NOT NULL DEFAULT ''",
             cancellationToken);
         await AddColumnIfMissingAsync(
             connection,

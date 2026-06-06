@@ -174,6 +174,66 @@ describe("AgentClient", () => {
     });
   });
 
+  it("prefers https and falls back to localhost http port when enabled", async () => {
+    const calls: string[] = [];
+    let attempts = 0;
+    const client = new AgentClient({
+      baseUrl: "https://127.0.0.1:41527",
+      allowHttpFallback: true,
+      fetchImpl: async (url) => {
+        calls.push(String(url));
+        attempts += 1;
+        if (attempts === 1) {
+          throw new TypeError("self signed certificate");
+        }
+
+        return Response.json({ ok: true });
+      }
+    });
+
+    await client.health();
+
+    expect(calls).toEqual([
+      "https://127.0.0.1:41527/api/v1/health",
+      "http://127.0.0.1:41528/api/v1/health"
+    ]);
+  });
+
+  it("verifies expected certificate fingerprint before authenticated requests", async () => {
+    const calls: string[] = [];
+    const client = new AgentClient({
+      baseUrl: "https://127.0.0.1:41527",
+      getToken: () => "token_123",
+      expectedCertFingerprint:
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      fetchImpl: async (url) => {
+        calls.push(String(url));
+        if (String(url).endsWith("/api/v1/agent/cert-fingerprint")) {
+          return Response.json({
+            fingerprint:
+              "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          });
+        }
+
+        return Response.json({
+          agentVersion: "0.6.0",
+          deviceName: "test-pc",
+          platform: "windows",
+          status: "running",
+          httpPort: 41527,
+          supportsWebRTC: true,
+          supportsDesktopClient: true,
+          codexStatus: "found"
+        });
+      }
+    });
+
+    await expect(client.agentStatus()).rejects.toMatchObject({
+      code: "E_CERT_FINGERPRINT_MISMATCH"
+    });
+    expect(calls).toEqual(["https://127.0.0.1:41527/api/v1/agent/cert-fingerprint"]);
+  });
+
   it("binds global fetch when no custom fetch implementation is provided", async () => {
     const originalFetch = globalThis.fetch;
     const calls: Array<{ context: unknown; url: string; init: RequestInit | undefined }> = [];

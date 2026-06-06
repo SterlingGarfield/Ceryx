@@ -14,6 +14,7 @@ public sealed record TrustedDeviceResponse(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("platform")] string Platform,
     [property: JsonPropertyName("permissions")] IReadOnlyList<string> Permissions,
+    [property: JsonPropertyName("certFingerprint")] string? CertFingerprint,
     [property: JsonPropertyName("wol")] WakeOnLanInfo? Wol,
     [property: JsonPropertyName("autoConnect")] bool AutoConnect,
     [property: JsonPropertyName("createdAt")] string CreatedAt,

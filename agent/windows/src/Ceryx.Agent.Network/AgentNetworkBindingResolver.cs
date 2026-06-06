@@ -8,11 +8,16 @@ public static class AgentNetworkBindingResolver
 {
     private const string BindUrlsEnvVar = "CERYX_AGENT_BIND_URLS";
 
-    public static IReadOnlyList<string> ResolveUrls(int port)
+    public static IReadOnlyList<string> ResolveUrls(int httpsPort, int httpFallbackPort)
     {
-        if (port <= 0 || port > 65535)
+        if (httpsPort <= 0 || httpsPort > 65535)
         {
-            throw new ArgumentOutOfRangeException(nameof(port), "Port must be between 1 and 65535.");
+            throw new ArgumentOutOfRangeException(nameof(httpsPort), "Port must be between 1 and 65535.");
+        }
+
+        if (httpFallbackPort <= 0 || httpFallbackPort > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(httpFallbackPort), "Port must be between 1 and 65535.");
         }
 
         var configured = Environment.GetEnvironmentVariable(BindUrlsEnvVar);
@@ -27,7 +32,8 @@ public static class AgentNetworkBindingResolver
 
         var urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            $"http://127.0.0.1:{port}"
+            $"https://127.0.0.1:{httpsPort}",
+            $"http://127.0.0.1:{httpFallbackPort}"
         };
 
         foreach (var address in EnumerateLanAddresses())
@@ -40,10 +46,26 @@ public static class AgentNetworkBindingResolver
             var host = address.AddressFamily == AddressFamily.InterNetworkV6
                 ? $"[{address}]"
                 : address.ToString();
-            urls.Add($"http://{host}:{port}");
+            urls.Add($"https://{host}:{httpsPort}");
         }
 
         return urls.OrderBy(static item => item, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public static IReadOnlyList<string> ResolveSubjectAlternativeNames()
+    {
+        var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "localhost",
+            "127.0.0.1"
+        };
+
+        foreach (var address in EnumerateLanAddresses())
+        {
+            values.Add(address.ToString());
+        }
+
+        return values.OrderBy(static item => item, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public static bool IsLanOrLoopback(IPAddress address)

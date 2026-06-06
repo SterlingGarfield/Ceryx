@@ -32,4 +32,23 @@ describe("trustedDeviceVault", () => {
     expect(devices[0]?.wol?.broadcastAddress).toBe("192.168.1.255");
     expect(devices[0]?.name).toBe("iPad");
   });
+
+  it("reads legacy http cache entries through the https local-agent alias", () => {
+    writeTrustedDevicesCache("http://127.0.0.1:41527", [
+      {
+        id: "dev_002",
+        name: "Desktop",
+        platform: "windows",
+        permissions: ["view_window"],
+        certFingerprint: "ABCDEF",
+        autoConnect: true,
+        createdAt: "2026-06-05T00:00:00.000Z"
+      }
+    ]);
+
+    const devices = readTrustedDevicesCache("https://127.0.0.1:41527");
+
+    expect(devices).toHaveLength(1);
+    expect(devices[0]?.certFingerprint).toBe("ABCDEF");
+  });
 });

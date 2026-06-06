@@ -50,9 +50,12 @@ import {
   writeDeviceToken
 } from "./tokenVault";
 import {
+  readAgentCertificateFingerprint,
   readTrustedDevicesCache,
+  writeAgentCertificateFingerprint,
   writeTrustedDevicesCache
 } from "@ceryx/feature-remote-control";
+import { normalizeAgentBaseUrl } from "./defaultAgentBaseUrl";
 
 export interface AgentProbeResult {
   baseUrl: string;
@@ -66,11 +69,14 @@ export interface AgentProbeResult {
 }
 
 function createClient(baseUrl: string): AgentClient {
+  const normalizedBaseUrl = normalizeAgentBaseUrl(baseUrl) ?? baseUrl;
   return new AgentClient({
-    baseUrl,
-    getToken: () => readDeviceToken(baseUrl),
-    setToken: (token) => writeDeviceToken(baseUrl, token),
-    clearToken: () => clearDeviceToken(baseUrl)
+    baseUrl: normalizedBaseUrl,
+    expectedCertFingerprint: readAgentCertificateFingerprint(normalizedBaseUrl),
+    allowHttpFallback: true,
+    getToken: () => readDeviceToken(normalizedBaseUrl),
+    setToken: (token) => writeDeviceToken(normalizedBaseUrl, token),
+    clearToken: () => clearDeviceToken(normalizedBaseUrl)
   });
 }
 
@@ -148,14 +154,26 @@ export async function requestPairing(
   baseUrl: string,
   request: { clientName: string; clientType: "ipad"; platform: string }
 ): Promise<PairingRequestResponse | PairingRequestRejectedResponse> {
-  return createClient(baseUrl).requestPairing(request);
+  const normalizedBaseUrl = normalizeAgentBaseUrl(baseUrl) ?? baseUrl;
+  const response = await createClient(normalizedBaseUrl).requestPairing(request);
+  if (response.ok && response.certFingerprint) {
+    writeAgentCertificateFingerprint(normalizedBaseUrl, response.certFingerprint);
+  }
+
+  return response;
 }
 
 export async function confirmPairing(
   baseUrl: string,
   request: { pairingId: string; code: string }
 ): Promise<PairingConfirmResponse | PairingConfirmRejectedResponse> {
-  return createClient(baseUrl).confirmPairing(request);
+  const normalizedBaseUrl = normalizeAgentBaseUrl(baseUrl) ?? baseUrl;
+  const response = await createClient(normalizedBaseUrl).confirmPairing(request);
+  if (response.ok) {
+    writeAgentCertificateFingerprint(normalizedBaseUrl, response.certFingerprint);
+  }
+
+  return response;
 }
 
 export async function desktopConfirmPairing(

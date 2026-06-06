@@ -78,10 +78,15 @@ public static class AgentHttpHostExtensions
 
         app.MapGet("/api/v1/health", HealthHandler)
             .AllowAnonymousAgent();
+        app.MapGet(
+            "/api/v1/agent/cert-fingerprint",
+            (AgentTlsCertificateManager tlsCertificateManager) =>
+                AgentCertificateFingerprintHandler(tlsCertificateManager))
+            .AllowAnonymousAgent();
         app.MapPost(
             "/api/v1/pairing/request",
-            (PairingRequestBody request, PairingStateMachine pairingStateMachine, IPairingRateLimiter pairingRateLimiter, ILoggerFactory loggerFactory, HttpContext context) =>
-                PairingRequestHandler(request, pairingStateMachine, pairingRateLimiter, loggerFactory, context))
+            (PairingRequestBody request, PairingStateMachine pairingStateMachine, IPairingRateLimiter pairingRateLimiter, AgentTlsCertificateManager tlsCertificateManager, ILoggerFactory loggerFactory, HttpContext context) =>
+                PairingRequestHandler(request, pairingStateMachine, pairingRateLimiter, tlsCertificateManager, loggerFactory, context))
             .AllowAnonymousAgent();
         app.MapPost(
             "/api/v1/pairing/desktop-confirm",
@@ -112,6 +117,12 @@ public static class AgentHttpHostExtensions
             .RequireAgentAuth();
         app.MapGet("/api/v1/agent/paths", () => AgentPathsHandler(localPaths))
             .RequireAgentAuth();
+        app.MapPost(
+            "/api/v1/agent/regenerate-cert",
+            (HttpContext context, AgentTlsCertificateManager tlsCertificateManager) =>
+                RegenerateCertificateHandler(context, tlsCertificateManager))
+            .RequireAgentAuth(Permission.ManageAgent)
+            .RequireLocalAgent();
         app.MapGet(
             "/api/v1/agent/connection-stats",
             (
@@ -361,6 +372,13 @@ public static class AgentHttpHostExtensions
             Version: ServiceVersion));
     }
 
+    private static Ok<AgentCertificateFingerprintResponse> AgentCertificateFingerprintHandler(
+        AgentTlsCertificateManager tlsCertificateManager)
+    {
+        return TypedResults.Ok(new AgentCertificateFingerprintResponse(
+            Fingerprint: tlsCertificateManager.GetCurrentFingerprint()));
+    }
+
     private static Ok<AgentStatusResponse> AgentStatusHandler(
         AgentRuntimeState runtimeState,
         IWindowCaptureBackendInfo backendInfo)
@@ -428,6 +446,7 @@ public static class AgentHttpHostExtensions
         PairingRequestBody request,
         PairingStateMachine pairingStateMachine,
         IPairingRateLimiter pairingRateLimiter,
+        AgentTlsCertificateManager tlsCertificateManager,
         ILoggerFactory loggerFactory,
         HttpContext context)
     {
@@ -468,7 +487,8 @@ public static class AgentHttpHostExtensions
                     State: result.State,
                     PairingId: null,
                     ExpiresAt: null,
-                    RejectedReason: result.RejectedReason),
+                    RejectedReason: result.RejectedReason,
+                    CertFingerprint: tlsCertificateManager.GetCurrentFingerprint()),
                 statusCode: StatusCodes.Status409Conflict);
         }
 
@@ -477,7 +497,8 @@ public static class AgentHttpHostExtensions
             State: result.State,
             PairingId: result.PairingId,
             ExpiresAt: result.ExpiresAt,
-            RejectedReason: null));
+            RejectedReason: null,
+            CertFingerprint: tlsCertificateManager.GetCurrentFingerprint()));
     }
 
     private static async Task<IResult> PairingDesktopConfirmHandler(
@@ -585,7 +606,8 @@ public static class AgentHttpHostExtensions
             DeviceId: result.Success.DeviceId,
             DeviceToken: result.Success.DeviceToken,
             Permissions: result.Success.Permissions.Select(static permission => permission.ToWireValue()).ToArray(),
-            Wol: result.Success.Wol));
+            Wol: result.Success.Wol,
+            CertFingerprint: result.Success.CertFingerprint));
     }
 
     private static async Task<IResult> ListDevicesHandler(
@@ -598,11 +620,21 @@ public static class AgentHttpHostExtensions
             Name: device.Name,
             Platform: device.Platform,
             Permissions: device.Permissions.Select(static permission => permission.ToWireValue()).ToArray(),
+            CertFingerprint: device.CertFingerprint,
             Wol: device.Wol,
             AutoConnect: true,
             CreatedAt: device.CreatedAt.ToString("O"),
             LastConnectedAt: null));
         return TypedResults.Ok(response);
+    }
+
+    private static IResult RegenerateCertificateHandler(
+        HttpContext context,
+        AgentTlsCertificateManager tlsCertificateManager)
+    {
+        var snapshot = tlsCertificateManager.RegenerateCertificate();
+        return TypedResults.Ok(new AgentCertificateFingerprintResponse(
+            Fingerprint: snapshot.Fingerprint));
     }
 
     private static async Task<IResult> DeleteDeviceHandler(

@@ -48,6 +48,7 @@ internal static class AuthTestHelper
             ClientType: clientType,
             TokenHash: hasher.Hash(token),
             Permissions: permissions,
+            CertFingerprint: string.Empty,
             Wol: null,
             CreatedAt: DateTimeOffset.UtcNow));
 

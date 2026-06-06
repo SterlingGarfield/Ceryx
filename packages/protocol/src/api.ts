@@ -4,6 +4,7 @@ export const ApiPrefix = "/api/v1" as const;
 
 export const PublicApiRoutes = [
   "GET /api/v1/health",
+  "GET /api/v1/agent/cert-fingerprint",
   "POST /api/v1/pairing/request",
   "POST /api/v1/pairing/desktop-confirm"
 ] as const;
@@ -12,6 +13,7 @@ export type PublicApiRoute = (typeof PublicApiRoutes)[number];
 export const ProtectedApiRoutes = [
   "GET /api/v1/agent/status",
   "GET /api/v1/agent/paths",
+  "POST /api/v1/agent/regenerate-cert",
   "GET /api/v1/agent/connection-stats",
   "POST /api/v1/pairing/confirm",
   "POST /api/v1/auth/connect",
@@ -73,6 +75,7 @@ export interface RoutePermission {
 export const RoutePermissions: RoutePermission[] = [
   { route: "GET /api/v1/agent/status" },
   { route: "GET /api/v1/agent/paths" },
+  { route: "POST /api/v1/agent/regenerate-cert", permission: "manage_agent" },
   { route: "GET /api/v1/agent/connection-stats" },
   { route: "POST /api/v1/pairing/confirm" },
   { route: "POST /api/v1/auth/connect" },

@@ -46,6 +46,7 @@ import {
   writeDeviceToken
 } from "./tokenVault";
 import {
+  readAgentCertificateFingerprint,
   readTrustedDevicesCache,
   writeTrustedDevicesCache
 } from "@ceryx/feature-remote-control";
@@ -55,7 +56,24 @@ import {
   startLocalAgentViaShell
 } from "./localShell";
 
-export const defaultLocalAgentBaseUrl = "http://127.0.0.1:41527";
+export const defaultLocalAgentBaseUrl = "https://127.0.0.1:41527";
+
+function normalizeLocalAgentBaseUrl(baseUrl: string): string {
+  try {
+    const parsed = new URL(baseUrl.trim());
+    if (
+      parsed.protocol === "http:" &&
+      parsed.port === "41527" &&
+      (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "::1")
+    ) {
+      parsed.protocol = "https:";
+    }
+
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return baseUrl;
+  }
+}
 
 export interface LocalAgentProbeResult {
   baseUrl: string;
@@ -70,11 +88,14 @@ export interface LocalAgentProbeResult {
 }
 
 function createClient(baseUrl: string): AgentClient {
+  const normalizedBaseUrl = normalizeLocalAgentBaseUrl(baseUrl);
   return new AgentClient({
-    baseUrl,
-    getToken: () => readDeviceToken(baseUrl),
-    setToken: (token) => writeDeviceToken(baseUrl, token),
-    clearToken: () => clearDeviceToken(baseUrl)
+    baseUrl: normalizedBaseUrl,
+    expectedCertFingerprint: readAgentCertificateFingerprint(normalizedBaseUrl),
+    allowHttpFallback: true,
+    getToken: () => readDeviceToken(normalizedBaseUrl),
+    setToken: (token) => writeDeviceToken(normalizedBaseUrl, token),
+    clearToken: () => clearDeviceToken(normalizedBaseUrl)
   });
 }
 

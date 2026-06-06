@@ -1,4 +1,4 @@
-const keyPrefix = "ceryx.ipad.device-token.";
+const keyPrefix = "ceryx.agent-cert-fingerprint.";
 
 function keyFor(baseUrl: string): string {
   return `${keyPrefix}${encodeURIComponent(baseUrl.trim().toLowerCase())}`;
@@ -29,45 +29,45 @@ function resolveAlternateBaseUrl(baseUrl: string): string | undefined {
   }
 }
 
-export function readDeviceToken(baseUrl: string): string | undefined {
+export function readAgentCertificateFingerprint(baseUrl: string): string | undefined {
   if (!baseUrl.trim()) {
     return undefined;
   }
 
   try {
-    const direct = globalThis.localStorage.getItem(keyFor(baseUrl)) ?? undefined;
+    const direct = globalThis.localStorage?.getItem(keyFor(baseUrl)) ?? undefined;
     if (direct) {
       return direct;
     }
 
     const alternateBaseUrl = resolveAlternateBaseUrl(baseUrl);
     return alternateBaseUrl
-      ? globalThis.localStorage.getItem(keyFor(alternateBaseUrl)) ?? undefined
+      ? globalThis.localStorage?.getItem(keyFor(alternateBaseUrl)) ?? undefined
       : undefined;
   } catch {
     return undefined;
   }
 }
 
-export function writeDeviceToken(baseUrl: string, token: string): void {
-  if (!baseUrl.trim() || !token.trim()) {
+export function writeAgentCertificateFingerprint(baseUrl: string, fingerprint: string): void {
+  if (!baseUrl.trim() || !fingerprint.trim()) {
     return;
   }
 
   try {
-    globalThis.localStorage.setItem(keyFor(baseUrl), token);
+    globalThis.localStorage?.setItem(keyFor(baseUrl), fingerprint.trim().toUpperCase());
   } catch {
     // Ignore storage failures.
   }
 }
 
-export function clearDeviceToken(baseUrl: string): void {
+export function clearAgentCertificateFingerprint(baseUrl: string): void {
   if (!baseUrl.trim()) {
     return;
   }
 
   try {
-    globalThis.localStorage.removeItem(keyFor(baseUrl));
+    globalThis.localStorage?.removeItem(keyFor(baseUrl));
   } catch {
     // Ignore storage failures.
   }

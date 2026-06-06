@@ -17,7 +17,10 @@ public sealed class LocalPaths
         Uploads = Path.Combine(Root, "Uploads");
         Screenshots = Path.Combine(Root, "Screenshots");
         Recordings = Path.Combine(Root, "Recordings");
+        Certificates = Path.Combine(Root, "certs");
         Database = Path.Combine(Root, "ceryx.db");
+        TlsCertificatePath = Path.Combine(Certificates, "agent-local.pfx");
+        TlsCertificatePasswordPath = Path.Combine(Certificates, "agent-local.pfx.password");
     }
 
     public string Root { get; }
@@ -30,7 +33,13 @@ public sealed class LocalPaths
 
     public string Recordings { get; }
 
+    public string Certificates { get; }
+
     public string Database { get; }
+
+    public string TlsCertificatePath { get; }
+
+    public string TlsCertificatePasswordPath { get; }
 
     public static LocalPaths CreateDefault()
     {
@@ -52,6 +61,7 @@ public sealed class LocalPaths
         Directory.CreateDirectory(Uploads);
         Directory.CreateDirectory(Screenshots);
         Directory.CreateDirectory(Recordings);
+        Directory.CreateDirectory(Certificates);
     }
 
     private static string ResolveRepositoryRoot()

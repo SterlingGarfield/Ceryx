@@ -62,8 +62,13 @@ export interface TrustedDevice {
   name: string;
   platform: string;
   permissions: CeryxPermission[];
+  certFingerprint?: string;
   wol?: WakeOnLanInfo;
   autoConnect: boolean;
   createdAt: string;
   lastConnectedAt?: string;
+}
+
+export interface AgentCertificateFingerprintResponse {
+  fingerprint: string;
 }

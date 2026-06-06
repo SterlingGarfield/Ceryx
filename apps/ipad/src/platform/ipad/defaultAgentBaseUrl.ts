@@ -1,4 +1,4 @@
-const localFallbackBaseUrl = "http://127.0.0.1:41527";
+const localFallbackBaseUrl = "https://127.0.0.1:41527";
 
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
@@ -35,5 +35,23 @@ export function isWebOriginBaseUrl(value: string): boolean {
 }
 
 export function normalizeAgentBaseUrl(value: string | undefined): string | undefined {
-  return value;
+  if (!value?.trim()) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+    if (
+      parsed.protocol === "http:" &&
+      parsed.port === "41527" &&
+      (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "::1")
+    ) {
+      parsed.protocol = "https:";
+      return stripTrailingSlash(parsed.toString());
+    }
+
+    return stripTrailingSlash(parsed.toString());
+  } catch {
+    return value.trim();
+  }
 }

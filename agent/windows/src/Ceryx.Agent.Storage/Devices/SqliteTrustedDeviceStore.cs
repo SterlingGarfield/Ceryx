@@ -34,6 +34,7 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
                         client_type,
                         token_hash,
                         permissions_json,
+                        cert_fingerprint,
                         wol_json,
                         created_at
                     )
@@ -44,6 +45,7 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
                         $clientType,
                         $tokenHash,
                         $permissionsJson,
+                        $certFingerprint,
                         $wolJson,
                         $createdAt
                     );
@@ -54,6 +56,7 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
                 command.Parameters.AddWithValue("$clientType", device.ClientType);
                 command.Parameters.AddWithValue("$tokenHash", device.TokenHash);
                 command.Parameters.AddWithValue("$permissionsJson", SerializePermissions(device.Permissions));
+                command.Parameters.AddWithValue("$certFingerprint", device.CertFingerprint);
                 command.Parameters.AddWithValue("$wolJson", SerializeWakeOnLan(device.Wol));
                 command.Parameters.AddWithValue("$createdAt", device.CreatedAt.ToString("O"));
                 await command.ExecuteNonQueryAsync(cancellationToken);
@@ -71,7 +74,7 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, name, platform, client_type, token_hash, permissions_json, wol_json, created_at
+            SELECT id, name, platform, client_type, token_hash, permissions_json, cert_fingerprint, wol_json, created_at
             FROM paired_devices
             ORDER BY created_at DESC;
             """;
@@ -87,8 +90,9 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
                 ClientType: reader.GetString(3),
                 TokenHash: reader.GetString(4),
                 Permissions: DeserializePermissions(reader.GetString(5)),
-                Wol: DeserializeWakeOnLan(reader.GetString(6)),
-                CreatedAt: DateTimeOffset.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind)));
+                CertFingerprint: reader.GetString(6),
+                Wol: DeserializeWakeOnLan(reader.GetString(7)),
+                CreatedAt: DateTimeOffset.Parse(reader.GetString(8), null, System.Globalization.DateTimeStyles.RoundtripKind)));
         }
 
         return devices;
@@ -101,7 +105,7 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, name, platform, client_type, token_hash, permissions_json, wol_json, created_at
+            SELECT id, name, platform, client_type, token_hash, permissions_json, cert_fingerprint, wol_json, created_at
             FROM paired_devices
             WHERE token_hash = $tokenHash
             LIMIT 1;
@@ -121,8 +125,9 @@ public sealed class SqliteTrustedDeviceStore : ITrustedDeviceStore
             ClientType: reader.GetString(3),
             TokenHash: reader.GetString(4),
             Permissions: DeserializePermissions(reader.GetString(5)),
-            Wol: DeserializeWakeOnLan(reader.GetString(6)),
-            CreatedAt: DateTimeOffset.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind));
+            CertFingerprint: reader.GetString(6),
+            Wol: DeserializeWakeOnLan(reader.GetString(7)),
+            CreatedAt: DateTimeOffset.Parse(reader.GetString(8), null, System.Globalization.DateTimeStyles.RoundtripKind));
     }
 
     public async Task<bool> DeleteAsync(string deviceId, CancellationToken cancellationToken = default)

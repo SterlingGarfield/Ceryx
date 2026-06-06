@@ -337,7 +337,7 @@ export function ConnectionsRoute() {
           <div style={{ display: "flex", gap: 10 }}>
             <input
               value={manualBaseUrl}
-              placeholder="http://192.168.1.88:41527"
+              placeholder="https://192.168.1.88:41527"
               onChange={(event) => setManualBaseUrl(event.target.value)}
               style={{
                 border: `1px solid ${ceryxColors.outlineVariant}`,

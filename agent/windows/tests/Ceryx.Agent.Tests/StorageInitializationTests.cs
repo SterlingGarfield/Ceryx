@@ -78,6 +78,7 @@ public sealed class StorageInitializationTests
                 "client_type",
                 "token_hash",
                 "permissions_json",
+                "cert_fingerprint",
                 "wol_json",
                 "created_at"
             };
