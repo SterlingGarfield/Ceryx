@@ -1,0 +1,121 @@
+name: Main Checks
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-checks:
+    name: Frontend Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  agent-checks:
+    name: Agent Checks
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore Agent solution
+        run: dotnet restore agent/windows/Ceryx.Agent.Windows.sln
+
+      - name: Test Agent solution
+        run: dotnet test agent/windows/Ceryx.Agent.Windows.sln -c Release --nologo --no-restore
+
+      - name: Run Agent performance measurements
+        run: dotnet test agent/windows/Ceryx.Agent.Windows.sln -c Release --nologo --no-restore --filter Category=W7PerformanceMeasurement
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: docs/qa/performance-results.md
+          if-no-files-found: warn
+
+  ipad-build:
+    name: iPad Build
+    runs-on: macos-latest
+    timeout-minutes: 60
+    needs:
+      - frontend-checks
+      - agent-checks
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build iPad web assets
+        run: pnpm --filter @ceryx/ipad build
+
+      - name: Sync iOS project
+        run: pnpm --filter @ceryx/ipad exec cap sync ios

@@ -2,6 +2,9 @@
 
 Ceryx v0.3 is planned as a dual-control product for iPad and Windows Desktop, backed by a local Windows Agent.
 
+[![PR Checks](https://github.com/SterlingGarfield/Ceryx/actions/workflows/pr-checks.yml/badge.svg?branch=master)](https://github.com/SterlingGarfield/Ceryx/actions/workflows/pr-checks.yml)
+[![Main Checks](https://github.com/SterlingGarfield/Ceryx/actions/workflows/main-checks.yml/badge.svg?branch=master)](https://github.com/SterlingGarfield/Ceryx/actions/workflows/main-checks.yml)
+
 ## Current Status (W8 acceptance in progress)
 
 Workspace verification lanes are currently passing:
@@ -18,6 +21,11 @@ Current explicit blocker:
 
 - None at repository-audit level for W8.  
 - Remaining environment validation still requires macOS/Xcode host execution for native iOS Debug build runtime evidence.
+
+## Releases
+
+- GitHub Releases: https://github.com/SterlingGarfield/Ceryx/releases
+- Release notes: [docs/release/v0.3-release-notes.md](docs/release/v0.3-release-notes.md)
 
 ## Scripts
 

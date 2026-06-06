@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  frontend-checks:
+    name: Frontend Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  agent-checks:
+    name: Agent Checks
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore Agent solution
+        run: dotnet restore agent/windows/Ceryx.Agent.Windows.sln
+
+      - name: Test Agent solution
+        run: dotnet test agent/windows/Ceryx.Agent.Windows.sln -c Release --nologo --no-restore
+
+  release-package:
+    name: Release Package
+    runs-on: windows-latest
+    timeout-minutes: 120
+    needs:
+      - frontend-checks
+      - agent-checks
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build release package
+        shell: pwsh
+        run: pwsh -ExecutionPolicy Bypass -File .\scripts\build-all.ps1
+
+      - name: Upload staged release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ceryx-release-${{ github.ref_name }}
+          path: |
+            .workspace-data/release/v*/agent/win-x64/**/*
+            .workspace-data/release/v*/windows-package/win-x64/**/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Ceryx ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            .workspace-data/release/v*/agent/win-x64/**/*
+            .workspace-data/release/v*/windows-package/win-x64/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

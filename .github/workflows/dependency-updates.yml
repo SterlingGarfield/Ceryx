@@ -1,0 +1,70 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-updates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-audit:
+    name: Frontend Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Report outdated frontend packages
+        run: pnpm outdated --recursive || true
+
+  dotnet-audit:
+    name: .NET Dependency Audit
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore Agent solution
+        run: dotnet restore agent/windows/Ceryx.Agent.Windows.sln
+
+      - name: Report outdated .NET packages
+        run: dotnet list agent/windows/Ceryx.Agent.Windows.sln package --outdated || true
+
+  dependabot-coverage-note:
+    name: Dependabot Coverage Note
+    runs-on: ubuntu-latest
+    needs:
+      - frontend-audit
+      - dotnet-audit
+    steps:
+      - name: Explain automation source
+        run: |
+          echo "Dependabot configuration in .github/dependabot.yml is responsible for automatic update PRs."
+          echo "This workflow provides visibility into npm and NuGet drift on a weekly cadence."
